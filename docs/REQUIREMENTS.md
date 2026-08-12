@@ -160,6 +160,21 @@ These rules apply to every answer the system produces, with no exceptions:
 - Access filtering happens **at retrieval time** (§6, step 4/5) — a chunk the
   user isn't permitted to see must be excluded before fusion/reranking, not
   filtered out after the fact.
+- **Tagging mechanism (ingestion side): folder-per-tier.** A document's tier
+  is its top-level subfolder under `WATCHED_FOLDER_PATH`, e.g.
+  `tier-2/report.txt` (nesting further inside that folder is fine —
+  `tier-1/quarterly/report.txt` is still tier-1). A document placed directly
+  under the watched root, with no tier subfolder, is rejected loudly
+  (`UntaggedDocumentError`) rather than silently defaulting to a tier — same
+  for a subfolder name that isn't in the configured `ACCESS_TIERS` list
+  (`UnknownAccessTierError`). No sidecar files or manifest to keep in sync.
+- **Failure isolation is per file, not per batch.** A misplaced/mistagged
+  file is reported as an `IngestionFailure` (relative path + reason)
+  alongside the successfully-tagged `IngestedDocument`s from the same watcher
+  cycle — one bad file doesn't discard everything else that converted and
+  tagged correctly in the same run. This matters at the target scale (10,000+
+  docs, §2): a single misplaced file blocking an entire cycle would be a
+  reliability problem, not just a data-quality one.
 
 ## 12. Safety & Security Controls
 
@@ -188,6 +203,7 @@ Log of decisions made explicitly during planning, for traceability:
 | Fallback message | Single canonical message everywhere | Simpler to test and guarantee consistency of |
 | Document source-of-truth | Watched folder/filesystem | No separate upload service to build; fits documents already managed as files |
 | Chunk size | 2000 chars, no overlap, block-based (blank-line-separated) boundary detection | Simple, dependency-free, keeps semantic units intact per §4; overlap wasn't part of the stated requirement so it was left out rather than assumed |
+| Access-tier tagging mechanism | Folder-per-tier under the watched root | No extra file format to maintain; matches the watched-folder source of truth |
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 

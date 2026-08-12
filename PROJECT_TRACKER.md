@@ -33,9 +33,10 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       (`src/agentic_rag/ingestion/chunker.py::chunk_markdown`)
 - [x] Wire chunker into the ingestion pipeline (`process_changes` now
       returns each document with its `chunks`)
-- [ ] Access-level tagging on ingested documents/chunks (next)
-- [ ] Access-level tagging on ingested documents/chunks
-- [ ] Edit/delete propagation (edits in minutes, deletes immediately)
+- [x] Access-level tagging: folder-per-tier convention, validated against the
+      configured `ACCESS_TIERS` list, wired into `process_changes`
+      (`src/agentic_rag/ingestion/tagger.py`)
+- [ ] Edit/delete propagation (edits in minutes, deletes immediately) (next)
 - [ ] Schema + validation for processed documents
 
 ## Phase 2 — Indexing Layer

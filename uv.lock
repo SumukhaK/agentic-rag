@@ -17,6 +17,7 @@ source = { editable = "." }
 dependencies = [
     { name = "markitdown" },
     { name = "pydantic-settings" },
+    { name = "requests" },
 ]
 
 [package.dev-dependencies]
@@ -28,6 +29,7 @@ dev = [
 requires-dist = [
     { name = "markitdown", specifier = ">=0.1.0" },
     { name = "pydantic-settings", specifier = ">=2.4" },
+    { name = "requests", specifier = ">=2.31" },
 ]
 
 [package.metadata.requires-dev]

@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic-settings>=2.4",
     "markitdown>=0.1.0",
+    "requests>=2.31",
 ]
 
 [dependency-groups]

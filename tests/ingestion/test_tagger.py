@@ -17,6 +17,10 @@ def test_access_tier_for_supports_nested_paths_within_a_tier():
     assert access_tier_for("tier-1/subfolder/report.txt", KNOWN_TIERS) == "tier-1"
 
 
+def test_access_tier_for_normalizes_windows_style_backslash_paths():
+    assert access_tier_for("tier-3\\sub\\report.txt", KNOWN_TIERS) == "tier-3"
+
+
 def test_access_tier_for_raises_when_file_has_no_tier_folder():
     with pytest.raises(UntaggedDocumentError):
         access_tier_for("report.txt", KNOWN_TIERS)

@@ -5,9 +5,18 @@ class UntaggedDocumentError(Exception):
     """Raised when a document sits directly under the watched root, with no
     tier subfolder to derive its access tier from."""
 
+    def __init__(self, relative_path: str):
+        super().__init__(f"'{relative_path}' has no tier subfolder")
+        self.relative_path = relative_path
+
 
 class UnknownAccessTierError(Exception):
     """Raised when a document's tier folder isn't in the configured tier list."""
+
+    def __init__(self, tier: str, relative_path: str):
+        super().__init__(f"unknown access tier '{tier}' for '{relative_path}'")
+        self.tier = tier
+        self.relative_path = relative_path
 
 
 def access_tier_for(relative_path: str, known_tiers: list[str]) -> str:
@@ -22,6 +31,6 @@ def access_tier_for(relative_path: str, known_tiers: list[str]) -> str:
 
     tier = parts[0]
     if tier not in known_tiers:
-        raise UnknownAccessTierError(tier)
+        raise UnknownAccessTierError(tier, relative_path)
 
     return tier

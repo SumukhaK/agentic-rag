@@ -36,9 +36,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
 - [x] Access-level tagging: folder-per-tier convention, validated against the
       configured `ACCESS_TIERS` list, wired into `process_changes`
       (`src/agentic_rag/ingestion/tagger.py`)
-- [ ] Edit/delete propagation (next)
-- [ ] Access-level tagging on ingested documents/chunks
-- [ ] Edit/delete propagation (edits in minutes, deletes immediately)
+- [ ] Edit/delete propagation (edits in minutes, deletes immediately) (next)
 - [ ] Schema + validation for processed documents
 
 ## Phase 2 — Indexing Layer

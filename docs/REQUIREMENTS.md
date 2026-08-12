@@ -168,6 +168,13 @@ These rules apply to every answer the system produces, with no exceptions:
   (`UntaggedDocumentError`) rather than silently defaulting to a tier — same
   for a subfolder name that isn't in the configured `ACCESS_TIERS` list
   (`UnknownAccessTierError`). No sidecar files or manifest to keep in sync.
+- **Failure isolation is per file, not per batch.** A misplaced/mistagged
+  file is reported as an `IngestionFailure` (relative path + reason)
+  alongside the successfully-tagged `IngestedDocument`s from the same watcher
+  cycle — one bad file doesn't discard everything else that converted and
+  tagged correctly in the same run. This matters at the target scale (10,000+
+  docs, §2): a single misplaced file blocking an entire cycle would be a
+  reliability problem, not just a data-quality one.
 
 ## 12. Safety & Security Controls
 

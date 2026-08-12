@@ -9,3 +9,4 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     watched_folder_path: Path
+    chunk_size_chars: int = 2000

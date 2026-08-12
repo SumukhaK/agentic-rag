@@ -19,3 +19,21 @@ def test_settings_requires_watched_folder_path(monkeypatch):
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_settings_defaults_chunk_size_chars(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("CHUNK_SIZE_CHARS", raising=False)
+
+    settings = Settings()
+
+    assert settings.chunk_size_chars == 2000
+
+
+def test_settings_chunk_size_chars_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("CHUNK_SIZE_CHARS", "500")
+
+    settings = Settings()
+
+    assert settings.chunk_size_chars == 500

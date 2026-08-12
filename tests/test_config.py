@@ -120,3 +120,21 @@ def test_settings_qdrant_settings_overridable_from_env(monkeypatch):
     assert settings.embedding_dimensions == 1024
     assert settings.qdrant_storage_path == Path("/data/prod-qdrant")
     assert settings.qdrant_collection_name == "football_docs"
+
+
+def test_settings_defaults_sparse_embedding_model(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("SPARSE_EMBEDDING_MODEL", raising=False)
+
+    settings = Settings()
+
+    assert settings.sparse_embedding_model == "Qdrant/bm25"
+
+
+def test_settings_sparse_embedding_model_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("SPARSE_EMBEDDING_MODEL", "Qdrant/other-sparse-model")
+
+    settings = Settings()
+
+    assert settings.sparse_embedding_model == "Qdrant/other-sparse-model"

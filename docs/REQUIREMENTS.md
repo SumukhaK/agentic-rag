@@ -71,6 +71,20 @@ honest about the limits of what it knows.
   vectors in the same database), rather than standing up a separate keyword
   search engine (e.g. Elasticsearch/OpenSearch). Chosen to minimize the number
   of stateful services that must be run and kept in sync.
+- **Sparse vectors: BM25 via `fastembed`** (`Qdrant/bm25`), Qdrant's own
+  recommended sparse embedder — runs locally, no server, deterministic per
+  text regardless of what else is in a batch (fixed term statistics, not
+  corpus-fitted IDF), which is what makes it safe to reindex without churn.
+  Tested for real rather than mocked, to actually verify that determinism.
+  **Correction from an earlier PR**: this was initially described as "the
+  same precedent as `markitdown`," which doesn't hold up — `markitdown`
+  needs no network for plain-text conversion, but `fastembed` downloads a
+  tokenizer/vocab bundle on first use, and caches it in the **OS temp
+  directory**, not a stable location, so this can recur on any environment
+  where that cache was cleared. The test suite now has a module-scoped
+  `autouse` fixture that skips these tests with a clear reason if the model
+  can't be loaded, rather than failing confusingly or silently depending on
+  network access every run.
 - Every indexed chunk carries metadata required for downstream filtering:
   source document ID, exact source location (for citation), and the
   **access-level/role tag(s)** required to view it (see §11).

@@ -17,3 +17,4 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 768
     qdrant_storage_path: Path = Path("./data/qdrant")
     qdrant_collection_name: str = "documents"
+    sparse_embedding_model: str = "Qdrant/bm25"

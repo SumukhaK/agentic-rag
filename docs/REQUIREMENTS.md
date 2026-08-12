@@ -165,13 +165,42 @@ alone be cited in an answer.
 Two caching layers, both required, to meet the speed/reliability target:
 
 - **Embedding cache**: avoid recomputing embeddings for text (queries or
-  chunks) that has already been embedded.
+  chunks) that has already been embedded. **Implemented as** `EmbeddingCache`
+  + `embed_with_cache()` (`src/agentic_rag/embedding/cache.py`) — an
+  in-memory dict keyed on `(model, text)`, generic over both dense and
+  sparse embeddings (the model name already discriminates between them, so
+  one shared cache instance covers both). Validates that the embedding
+  function returned exactly as many results as were requested *before*
+  caching any of them — a partial response is a loud `ValueError`, not a
+  silently cached gap that would look like a legitimate hit on retry.
+  `index_document()` takes a required `embedding_cache` parameter rather
+  than creating one internally — the cache only pays off when **one
+  instance is shared across many `index_document()` calls** (e.g. one per
+  sync cycle), so repeated content across *different* documents
+  (boilerplate, headers, disclaimers) skips re-embedding. Verified live: an
+  identical chunk embedded twice with a shared cache went from ~6.6s (real
+  Ollama call) to ~0.006s (cache hit, no network call).
+  **Two things deliberately not solved yet, both flagged rather than
+  silently deferred:**
+  - **No persistence** — scoped to the process's lifetime. What backend,
+    if any, is an open question for whenever that matters in practice.
+  - **No eviction — the dict is unbounded.** At the stated scale (10,000+
+    docs, §2), a cache shared across one full sync cycle could hold
+    hundreds of thousands of embeddings in memory at once. Eviction policy
+    was already flagged as an implementation detail for a later phase
+    before this PR existed; this makes that concern concrete rather than
+    theoretical. It's also unclear whether Phase 7's eventual scheduler
+    should create one cache per sync cycle (loses cross-cycle hits on a
+    mostly-stable corpus) or one for the process's lifetime (unbounded
+    growth over days/weeks of uptime) — that tradeoff needs a decision
+    when Phase 7 is designed, not an assumption baked in here.
 - **Semantic cache**: cache answers keyed on query *meaning*, so
   semantically-similar repeat questions can be served without re-running the
-  full retrieval + generation pipeline.
+  full retrieval + generation pipeline. Not yet implemented — a Phase 3/5
+  concern (this is about caching final *answers*, not embeddings).
 
-Cache backend, eviction policy, and semantic-similarity threshold for cache
-hits are implementation details for the relevant phase in `PROJECT_TRACKER.md`.
+Cache backend, eviction policy, and semantic-similarity threshold for the
+semantic cache are still open — see §14.
 
 ## 8. Grounding & Answer Rules
 

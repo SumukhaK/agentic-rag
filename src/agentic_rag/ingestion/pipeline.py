@@ -6,6 +6,7 @@ from pathlib import Path
 from agentic_rag.ingestion.chunker import Chunk, chunk_markdown
 from agentic_rag.ingestion.converter import convert_to_markdown
 from agentic_rag.ingestion.tagger import access_tier_for
+from agentic_rag.ingestion.validation import validate_document
 from agentic_rag.ingestion.watcher import FolderChanges
 
 
@@ -29,15 +30,17 @@ def process_changes(
     chunk_size_chars: int,
     known_tiers: list[str],
 ) -> tuple[list[IngestedDocument], list[IngestionFailure]]:
-    """Convert, chunk, and access-tag every created/modified file in `changes`.
+    """Convert, chunk, access-tag, and validate every created/modified file
+    in `changes`.
 
     A file that fails at any step - unrecognized access tier, a conversion
-    error, or anything else - doesn't abort the rest of the batch. It's
-    reported as an IngestionFailure alongside the IngestedDocuments for
-    every other file that succeeded. This function is the one Phase 7's
-    scheduled sync job will call repeatedly: a single corrupted or
-    unsupported file must not be able to permanently stall every other
-    document in the corpus by raising on every run.
+    error, failing schema validation (e.g. zero usable chunks), or anything
+    else - doesn't abort the rest of the batch. It's reported as an
+    IngestionFailure alongside the IngestedDocuments for every other file
+    that succeeded. This function is the one Phase 7's scheduled sync job
+    will call repeatedly: a single corrupted, unsupported, or blank file
+    must not be able to permanently stall every other document in the
+    corpus by raising on every run.
 
     Deletions carry nothing to convert; propagating them to the index is
     the indexing phase's responsibility, not this pipeline step's.
@@ -50,19 +53,20 @@ def process_changes(
             access_tier = access_tier_for(relative_path, known_tiers)
             markdown = convert_to_markdown(folder / relative_path)
             chunks = chunk_markdown(markdown, chunk_size_chars)
-        except Exception as exc:
-            failures.append(
-                IngestionFailure(relative_path=relative_path, reason=str(exc))
-            )
-            continue
-
-        documents.append(
-            IngestedDocument(
+            document = IngestedDocument(
                 relative_path=relative_path,
                 markdown=markdown,
                 chunks=chunks,
                 access_tier=access_tier,
             )
-        )
+            validate_document(document)
+        except Exception as exc:
+            reason = f"{type(exc).__name__}: {exc}"
+            failures.append(
+                IngestionFailure(relative_path=relative_path, reason=reason)
+            )
+            continue
+
+        documents.append(document)
 
     return documents, failures

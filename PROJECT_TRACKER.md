@@ -26,7 +26,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       created/modified/deleted files (`src/agentic_rag/ingestion/watcher.py`)
 - [x] `markitdown` conversion wrapper: any supported file → Markdown text
       (`src/agentic_rag/ingestion/converter.py`)
-- [ ] Wire watcher → converter into a single ingestion pipeline step (next)
+- [x] Wire watcher → converter into a single ingestion pipeline step
+      (`src/agentic_rag/ingestion/pipeline.py::process_changes`)
 - [ ] Hybrid chunking (fixed size + boundary-aware extension)
 - [ ] Access-level tagging on ingested documents/chunks
 - [ ] Edit/delete propagation (edits in minutes, deletes immediately)

@@ -91,14 +91,20 @@ honest about the limits of what it knows.
   as the Qdrant point payload: `relative_path`, `chunk_index`, `text` (the
   chunk's own content, for citation without a second lookup), and
   `access_tier`.
-- **Upsert is idempotent and edit-safe.** `index_document()` deletes all
-  existing points for a document's `relative_path` before inserting its
-  current chunk set, so an edit that reduces the chunk count can't leave
-  orphaned, stale points searchable forever. Point IDs are deterministic
-  (`uuid5` of `relative_path` + chunk index), so re-running
-  `index_document()` for the same document converges to the same points
-  instead of accumulating duplicates — this matters once Phase 7 puts
-  ingestion on a schedule that may retry.
+- **Upsert is idempotent and edit-safe.** `index_document()` embeds a
+  document's full chunk set (dense + sparse) *before* touching the index,
+  and only then deletes existing points for that `relative_path` and
+  inserts the fresh set. Embedding first — not deleting first — matters: a
+  transient embedding failure (Ollama momentarily unreachable, a timeout
+  under load) must leave an already-indexed document exactly as it was,
+  not silently vanish it from search results with nothing to replace it.
+  A length mismatch between the embedded vectors and the chunk count
+  (which `zip()` would otherwise truncate to silently, dropping chunks
+  with no error) raises loudly instead of partially indexing a document.
+  Point IDs are deterministic (`uuid5` of `relative_path` + chunk index),
+  so re-running `index_document()` for the same document converges to the
+  same points instead of accumulating duplicates — this matters once
+  Phase 7 puts ingestion on a schedule that may retry.
 - Embedding model: `nomic-embed-text`, served locally via Ollama (pulled and
   verified working — 768-dimensional vectors — during Phase 2). Embedding
   calls use Ollama's batch-capable `/api/embed` endpoint (many texts in one

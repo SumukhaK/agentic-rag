@@ -28,7 +28,10 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       (`src/agentic_rag/ingestion/converter.py`)
 - [x] Wire watcher → converter into a single ingestion pipeline step
       (`src/agentic_rag/ingestion/pipeline.py::process_changes`)
-- [ ] Hybrid chunking (fixed size + boundary-aware extension)
+- [x] Hybrid chunking: fixed target size (`CHUNK_SIZE_CHARS`, default 2000)
+      with boundary-aware extension for oversized blocks
+      (`src/agentic_rag/ingestion/chunker.py::chunk_markdown`)
+- [ ] Wire chunker into the ingestion pipeline (`process_changes`) (next)
 - [ ] Access-level tagging on ingested documents/chunks
 - [ ] Edit/delete propagation (edits in minutes, deletes immediately)
 - [ ] Schema + validation for processed documents

@@ -44,9 +44,15 @@ honest about the limits of what it knows.
   semantic unit (e.g. a section, list, or table) would otherwise be split
   across a chunk boundary and lose context, extend/adjust the chunk to keep
   that unit intact rather than cutting it mid-way.
-- Exact target chunk size, overlap size, and the boundary-detection heuristic
-  are implementation details to be settled in Phase 1 (see `PROJECT_TRACKER.md`),
-  and must live in the central config module, not hardcoded.
+- **Implemented as**: Markdown is split into blocks on blank lines (the
+  standard Markdown separator between paragraphs, list groups, and tables),
+  then blocks are greedily packed into a chunk up to `chunk_size_chars`
+  (config, default **2000**, overridable via `.env`). A single block larger
+  than `chunk_size_chars` is never split — it becomes its own oversized
+  chunk. No character-level overlap between chunks is applied; keeping
+  semantic units intact was the stated goal, not overlap, so overlap was not
+  added. If retrieval quality later shows overlap is needed, that's a
+  follow-up decision, not an assumption baked in now.
 
 ## 5. Indexing
 
@@ -181,6 +187,7 @@ Log of decisions made explicitly during planning, for traceability:
 | Reranker | Local open-source cross-encoder (`bge-reranker-v2-m3`-class) | Consistent with local-first/open-source generation stack |
 | Fallback message | Single canonical message everywhere | Simpler to test and guarantee consistency of |
 | Document source-of-truth | Watched folder/filesystem | No separate upload service to build; fits documents already managed as files |
+| Chunk size | 2000 chars, no overlap, block-based (blank-line-separated) boundary detection | Simple, dependency-free, keeps semantic units intact per §4; overlap wasn't part of the stated requirement so it was left out rather than assumed |
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 
@@ -189,6 +196,5 @@ Log of decisions made explicitly during planning, for traceability:
   external API dependency). Needs a decision before Phase 6.
 - **Real access-tier names**: the linear tier list is a placeholder (§11)
   until the actual organizational roles are provided.
-- **Exact chunk size / overlap** for hybrid chunking (§4).
 - **Cache backend and semantic-similarity threshold** for the semantic cache
   (§7).

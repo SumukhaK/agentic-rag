@@ -3,6 +3,7 @@ import uuid
 from qdrant_client import QdrantClient
 from qdrant_client.models import FieldCondition, Filter, MatchValue, PointStruct
 
+from agentic_rag.embedding.cache import EmbeddingCache, embed_with_cache
 from agentic_rag.embedding.ollama_client import embed_texts
 from agentic_rag.embedding.sparse_client import embed_sparse_texts
 from agentic_rag.indexing.qdrant_setup import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
@@ -41,6 +42,7 @@ def index_document(
     ollama_base_url: str,
     sparse_model: str,
     embedding_timeout_seconds: int,
+    embedding_cache: EmbeddingCache,
 ) -> None:
     """Embed every chunk of `document` (dense + sparse) and upsert it as a
     Qdrant point, with the payload citation/access-control needs at query
@@ -60,19 +62,34 @@ def index_document(
     leaving orphaned points behind: if a document shrinks from 5 chunks to
     3, only upserting the new 3 (without first clearing what was there)
     would leave chunks 3-4 stale and searchable forever.
+
+    `embedding_cache` is shared across calls by the caller (e.g. one
+    instance per sync cycle, not one per document) - that's what lets
+    identical chunk text repeated across different documents (boilerplate,
+    headers, disclaimers) skip re-embedding.
     """
     if not document.chunks:
         delete_document(client, collection_name, document.relative_path)
         return
 
     texts = [chunk.text for chunk in document.chunks]
-    dense_vectors = embed_texts(
+    dense_vectors = embed_with_cache(
         texts,
         model=embedding_model,
-        base_url=ollama_base_url,
-        timeout=embedding_timeout_seconds,
+        cache=embedding_cache,
+        embed_fn=lambda batch: embed_texts(
+            batch,
+            model=embedding_model,
+            base_url=ollama_base_url,
+            timeout=embedding_timeout_seconds,
+        ),
     )
-    sparse_vectors = embed_sparse_texts(texts, model_name=sparse_model)
+    sparse_vectors = embed_with_cache(
+        texts,
+        model=sparse_model,
+        cache=embedding_cache,
+        embed_fn=lambda batch: embed_sparse_texts(batch, model_name=sparse_model),
+    )
 
     if len(dense_vectors) != len(document.chunks) or len(sparse_vectors) != len(
         document.chunks

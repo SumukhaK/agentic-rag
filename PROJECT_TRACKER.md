@@ -85,7 +85,16 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       single-item convenience wrapper. Tested with mocked HTTP (including
       malformed-response cases) and smoke-tested against the real local
       Ollama server (`src/agentic_rag/embedding/ollama_client.py`)
-- [ ] Embedding cache
+- [x] Embedding cache: `EmbeddingCache` + `embed_with_cache()` — in-memory,
+      keyed on `(model, sha256(text))`, generic over dense and sparse.
+      Wired into `index_document()` via a required `embedding_cache` param
+      shared across calls, so repeated chunk text across different
+      documents in the same run skips re-embedding. Verified live: cache
+      hit went from ~6.6s to ~0.006s. Deliberately in-memory only for this
+      first version — persistence is an explicit open question, not
+      designed speculatively now (`src/agentic_rag/embedding/cache.py`)
+
+**Phase 2 complete.**
 
 ## Phase 3 — Retrieval Pipeline
 

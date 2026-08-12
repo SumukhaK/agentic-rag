@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
+from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.embedding.ollama_client import EmbeddingError
 from agentic_rag.embedding.sparse_client import SparseEmbeddingError, embed_sparse_texts
 from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
@@ -46,7 +47,7 @@ def _count_points_for(client, relative_path):
     return len(points)
 
 
-def _index(client, document, mock_embed_texts, dense_vectors):
+def _index(client, document, mock_embed_texts, dense_vectors, cache=None):
     mock_embed_texts.return_value = dense_vectors
     index_document(
         client,
@@ -56,6 +57,7 @@ def _index(client, document, mock_embed_texts, dense_vectors):
         ollama_base_url="http://localhost:11434",
         sparse_model=SPARSE_MODEL,
         embedding_timeout_seconds=30,
+        embedding_cache=cache if cache is not None else EmbeddingCache(),
     )
 
 
@@ -125,6 +127,7 @@ def test_index_document_leaves_existing_points_untouched_when_embedding_fails(
             ollama_base_url="http://localhost:11434",
             sparse_model=SPARSE_MODEL,
             embedding_timeout_seconds=30,
+            embedding_cache=EmbeddingCache(),
         )
 
     # A transient embedding failure must not delete a document that was
@@ -152,9 +155,29 @@ def test_index_document_raises_on_embedding_count_mismatch_instead_of_indexing_p
             ollama_base_url="http://localhost:11434",
             sparse_model=SPARSE_MODEL,
             embedding_timeout_seconds=30,
+            embedding_cache=EmbeddingCache(),
         )
 
     assert _count_points_for(client, "tier-1/a.txt") == 0
+
+
+@patch("agentic_rag.indexing.upsert.embed_texts")
+def test_index_document_reuses_a_shared_cache_across_documents(mock_embed_texts, client):
+    # A shared EmbeddingCache instance across two index_document() calls
+    # means repeated chunk text (e.g. a boilerplate disclaimer) is only
+    # embedded once, on the first call.
+    cache = EmbeddingCache()
+    mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
+    doc_a = _document(relative_path="tier-1/a.txt", chunk_texts=("shared boilerplate",))
+    _index(client, doc_a, mock_embed_texts, [[0.1, 0.2, 0.3]], cache=cache)
+    assert mock_embed_texts.call_count == 1
+
+    doc_b = _document(relative_path="tier-1/b.txt", chunk_texts=("shared boilerplate",))
+    _index(client, doc_b, mock_embed_texts, [[0.1, 0.2, 0.3]], cache=cache)
+
+    # embed_texts should NOT have been called again for the same text.
+    assert mock_embed_texts.call_count == 1
+    assert _count_points_for(client, "tier-1/b.txt") == 1
 
 
 @patch("agentic_rag.indexing.upsert.embed_texts")

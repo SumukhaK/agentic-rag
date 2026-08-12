@@ -20,9 +20,13 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
 
 ## Phase 1 — Data Ingestion & Processing
 
-- [ ] Document conversion via `markitdown` (any file type → Markdown)
-- [ ] Document source-of-truth decided (upload API / watched folder / external
-      system) — **blocked on open item**, see `docs/REQUIREMENTS.md` §14
+- [x] Document source-of-truth decided: watched folder/filesystem (see
+      `docs/REQUIREMENTS.md` §3, §13)
+- [x] Folder watcher: deterministic snapshot/diff of a folder to detect
+      created/modified/deleted files (`src/agentic_rag/ingestion/watcher.py`)
+- [x] `markitdown` conversion wrapper: any supported file → Markdown text
+      (`src/agentic_rag/ingestion/converter.py`)
+- [ ] Wire watcher → converter into a single ingestion pipeline step (next)
 - [ ] Hybrid chunking (fixed size + boundary-aware extension)
 - [ ] Access-level tagging on ingested documents/chunks
 - [ ] Edit/delete propagation (edits in minutes, deletes immediately)

@@ -91,6 +91,23 @@ def test_process_changes_isolates_a_conversion_failure_without_losing_valid_ones
     assert [f.relative_path for f in failures] == ["tier-1/missing.txt"]
 
 
+def test_process_changes_reports_a_blank_document_as_a_validation_failure(tmp_path):
+    (tmp_path / "tier-1").mkdir()
+    # An all-whitespace file converts to markdown with no usable content, so
+    # chunk_markdown produces zero chunks - that should be a reported
+    # failure, not a document silently entering the index with nothing in it.
+    (tmp_path / "tier-1" / "blank.txt").write_text("   \n\n   ")
+    changes = FolderChanges(created=["tier-1/blank.txt"], modified=[], deleted=[])
+
+    documents, failures = process_changes(
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+    )
+
+    assert documents == []
+    assert [f.relative_path for f in failures] == ["tier-1/blank.txt"]
+    assert "no chunks" in failures[0].reason
+
+
 def test_process_changes_chunks_each_document(tmp_path):
     (tmp_path / "tier-1").mkdir()
     (tmp_path / "tier-1" / "a.txt").write_text("Arsenal drew 1-1.")

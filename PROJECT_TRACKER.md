@@ -43,7 +43,15 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       snapshot to persist for the next cycle
       (`src/agentic_rag/ingestion/sync.py`). Scheduling how often this runs
       (the "minutes"/"immediately" timing from FR4) is Phase 7's job.
-- [ ] Schema + validation for processed documents (next)
+- [x] Schema + validation for processed documents: `IngestedDocument`/`Chunk`
+      (dataclasses) are the schema; `validate_document()` enforces the
+      invariants before a document is considered indexable - non-empty
+      chunk list, non-empty chunk text, non-empty access tier. A failing
+      document becomes an `IngestionFailure`, same as a tagging or
+      conversion error, rather than silently entering the index
+      (`src/agentic_rag/ingestion/validation.py`)
+
+**Phase 1 complete.**
 
 ## Phase 2 — Indexing Layer
 

@@ -37,6 +37,15 @@ honest about the limits of what it knows.
   corpus's source of truth. New, modified, and deleted files in that folder
   drive ingestion — there is no separate upload API or external-system sync
   in this phase.
+- **Schema + validation.** `IngestedDocument`/`Chunk` define the schema of a
+  processed document — the shape everything downstream (indexing) can rely
+  on. `validate_document()` enforces the invariants that shape alone doesn't
+  guarantee at runtime: a non-empty chunk list, non-empty chunk text, and a
+  non-empty access tier. A document that fails validation (e.g. a blank
+  file that converted to zero usable chunks) is reported as an
+  `IngestionFailure` — the same loud-error, per-file-isolated path as a
+  tagging or conversion failure — rather than silently entering the index
+  with nothing useful in it.
 
 ## 4. Chunking Strategy
 

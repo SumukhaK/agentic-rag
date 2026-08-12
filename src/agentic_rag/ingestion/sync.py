@@ -13,7 +13,7 @@ from agentic_rag.ingestion.watcher import FileState, diff_snapshots, snapshot
 
 @dataclass(frozen=True)
 class SyncResult:
-    snapshot: dict[str, FileState]
+    current_snapshot: dict[str, FileState]
     documents: list[IngestedDocument]
     failures: list[IngestionFailure]
     deleted: list[str]
@@ -41,7 +41,7 @@ def sync_folder(
     )
 
     return SyncResult(
-        snapshot=current_snapshot,
+        current_snapshot=current_snapshot,
         documents=documents,
         failures=failures,
         deleted=changes.deleted,

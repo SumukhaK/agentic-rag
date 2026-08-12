@@ -69,7 +69,7 @@ def test_sync_folder_returns_the_current_snapshot_for_the_next_cycle(tmp_path):
         tmp_path, previous_snapshot={}, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
     )
 
-    assert result.snapshot == snapshot(tmp_path)
+    assert result.current_snapshot == snapshot(tmp_path)
 
 
 def test_sync_folder_isolates_a_tagging_failure_from_valid_documents(tmp_path):

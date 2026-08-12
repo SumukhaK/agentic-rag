@@ -63,9 +63,9 @@ response (§10).
 
 **Phase 0 — Project Foundations: complete.**
 
-**Phase 1 — Data Ingestion & Processing: in progress (7 of 8 items shipped).**
+**Phase 1 — Data Ingestion & Processing: complete.**
 
-Shipped so far (`src/agentic_rag/ingestion/`):
+Shipped (`src/agentic_rag/ingestion/`):
 - Ingestion source-of-truth: a watched folder, with a tier subfolder per
   access level (`tier-2/report.txt`)
 - Folder watcher — deterministic snapshot/diff of the folder, no OS-level
@@ -74,12 +74,16 @@ Shipped so far (`src/agentic_rag/ingestion/`):
 - Hybrid chunking — fixed target size by default, never splits an oversized
   semantic block (paragraph/list/table) mid-way
 - Access-tier tagging, validated against the configured tier list
-- Per-file failure isolation (bad tagging *or* a conversion error) so one
-  corrupt/misplaced file can't stall an entire ingestion cycle
+- Schema validation (`validate_document`) — rejects a document with zero
+  usable chunks, empty chunk text, or no access tier before it can reach
+  the index
+- Per-file failure isolation (bad tagging, a conversion error, *or* a
+  failed validation) so one bad file can't stall an entire ingestion cycle
 - `sync_folder()` — the ingestion-cycle entrypoint tying all of the above
   together and propagating edits/deletions (FR4)
 
-Remaining in Phase 1: schema + validation for processed documents.
+**Phase 2 — Indexing Layer: not started.** Qdrant setup, HNSW + native
+hybrid search, embedding generation/caching.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

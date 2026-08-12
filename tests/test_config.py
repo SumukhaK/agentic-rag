@@ -37,3 +37,21 @@ def test_settings_chunk_size_chars_overridable_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.chunk_size_chars == 500
+
+
+def test_settings_defaults_access_tiers(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("ACCESS_TIERS", raising=False)
+
+    settings = Settings()
+
+    assert settings.access_tiers == ["tier-1", "tier-2", "tier-3"]
+
+
+def test_settings_access_tiers_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("ACCESS_TIERS", '["developer", "manager", "director"]')
+
+    settings = Settings()
+
+    assert settings.access_tiers == ["developer", "manager", "director"]

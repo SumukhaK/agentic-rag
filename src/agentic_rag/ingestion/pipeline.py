@@ -61,8 +61,9 @@ def process_changes(
             )
             validate_document(document)
         except Exception as exc:
+            reason = f"{type(exc).__name__}: {exc}"
             failures.append(
-                IngestionFailure(relative_path=relative_path, reason=str(exc))
+                IngestionFailure(relative_path=relative_path, reason=reason)
             )
             continue
 

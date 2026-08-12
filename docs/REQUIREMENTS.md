@@ -168,13 +168,18 @@ These rules apply to every answer the system produces, with no exceptions:
   (`UntaggedDocumentError`) rather than silently defaulting to a tier — same
   for a subfolder name that isn't in the configured `ACCESS_TIERS` list
   (`UnknownAccessTierError`). No sidecar files or manifest to keep in sync.
-- **Failure isolation is per file, not per batch.** A misplaced/mistagged
-  file is reported as an `IngestionFailure` (relative path + reason)
-  alongside the successfully-tagged `IngestedDocument`s from the same watcher
-  cycle — one bad file doesn't discard everything else that converted and
-  tagged correctly in the same run. This matters at the target scale (10,000+
-  docs, §2): a single misplaced file blocking an entire cycle would be a
-  reliability problem, not just a data-quality one.
+- **Failure isolation is per file, not per batch.** A file that fails at any
+  ingestion step — unrecognized access tier, or a conversion error (corrupt
+  file, unsupported format, vanished between being detected and being read)
+  — is reported as an `IngestionFailure` (relative path + reason) alongside
+  the successfully-processed `IngestedDocument`s from the same watcher cycle.
+  One bad file never discards everything else that succeeded in the same
+  run, and — critically once Phase 7 puts this on a schedule — a single
+  persistently-bad file (e.g. a corrupt PDF that will never convert) cannot
+  permanently stall ingestion of every other document in the corpus by
+  raising on every cycle. This matters directly at the target scale (10,000+
+  docs, §2): a batch-abort-on-first-error design would turn one bad file
+  into a reliability outage, not just a data-quality blemish.
 
 ## 12. Safety & Security Controls
 

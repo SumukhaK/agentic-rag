@@ -71,6 +71,26 @@ def test_process_changes_isolates_an_unknown_tier_without_losing_valid_ones(tmp_
     assert "unknown access tier" in failures[0].reason
 
 
+def test_process_changes_isolates_a_conversion_failure_without_losing_valid_ones(
+    tmp_path,
+):
+    (tmp_path / "tier-1").mkdir()
+    (tmp_path / "tier-1" / "good.txt").write_text("Arsenal drew 1-1.")
+    # tier-1/missing.txt is validly tagged but doesn't exist on disk, simulating
+    # a file that vanished (or was never actually written) between the watcher
+    # snapshotting it and the pipeline trying to convert it.
+    changes = FolderChanges(
+        created=["tier-1/good.txt", "tier-1/missing.txt"], modified=[], deleted=[]
+    )
+
+    documents, failures = process_changes(
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+    )
+
+    assert [doc.relative_path for doc in documents] == ["tier-1/good.txt"]
+    assert [f.relative_path for f in failures] == ["tier-1/missing.txt"]
+
+
 def test_process_changes_chunks_each_document(tmp_path):
     (tmp_path / "tier-1").mkdir()
     (tmp_path / "tier-1" / "a.txt").write_text("Arsenal drew 1-1.")

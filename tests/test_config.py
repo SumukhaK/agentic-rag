@@ -95,3 +95,28 @@ def test_settings_embedding_timeout_seconds_overridable_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.embedding_timeout_seconds == 60
+
+
+def test_settings_defaults_qdrant_settings(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    for key in ("EMBEDDING_DIMENSIONS", "QDRANT_STORAGE_PATH", "QDRANT_COLLECTION_NAME"):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = Settings()
+
+    assert settings.embedding_dimensions == 768
+    assert settings.qdrant_storage_path == Path("./data/qdrant")
+    assert settings.qdrant_collection_name == "documents"
+
+
+def test_settings_qdrant_settings_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "1024")
+    monkeypatch.setenv("QDRANT_STORAGE_PATH", "/data/prod-qdrant")
+    monkeypatch.setenv("QDRANT_COLLECTION_NAME", "football_docs")
+
+    settings = Settings()
+
+    assert settings.embedding_dimensions == 1024
+    assert settings.qdrant_storage_path == Path("/data/prod-qdrant")
+    assert settings.qdrant_collection_name == "football_docs"

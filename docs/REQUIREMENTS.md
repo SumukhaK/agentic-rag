@@ -84,6 +84,25 @@ honest about the limits of what it knows.
   local mode (on-disk storage, no server process) rather than a container.
   This is swappable for a real Qdrant server later via config (a URL vs. a
   local path) — the indexing code itself doesn't need to change.
+- **HNSW**: Qdrant indexes dense vectors with HNSW by default — there's no
+  alternative index to opt into, so `ensure_collection()` creating a
+  collection with standard vector params already satisfies this
+  requirement, with no manual HNSW tuning needed unless retrieval quality
+  later calls for it.
+- **Collection schema set up for hybrid search from the start.** Qdrant
+  can't add a sparse vector field to a collection after creation — only
+  recreate it. `ensure_collection()` therefore creates a named dense vector
+  (`"dense"`) *and* a named sparse vector (`"sparse"`) together, even
+  though sparse vectors aren't populated until the native hybrid search
+  item ships. Confirmed empirically: attempting to add a sparse vector via
+  `update_collection()` to an existing dense-only collection fails with
+  `ValueError: Vector sparse does not exist in the collection`.
+- **Vector-size mismatch is a loud error, not a silent no-op.**
+  `ensure_collection()` checks an existing collection's dense vector size
+  against what's requested and raises `CollectionSchemaMismatchError` on a
+  mismatch (e.g. `EMBEDDING_DIMENSIONS` changed without migrating the
+  collection), rather than silently leaving a stale, mismatched collection
+  in place until a later upsert fails with an opaque dimension error.
 
 ## 6. Retrieval Pipeline (query journey)
 

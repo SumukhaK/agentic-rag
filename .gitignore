@@ -12,6 +12,9 @@ venv/
 .env
 .env.local
 
+# Local data / runtime storage
+data/
+
 # OS
 .DS_Store
 Thumbs.db

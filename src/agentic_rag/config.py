@@ -14,3 +14,6 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     embedding_model: str = "nomic-embed-text"
     embedding_timeout_seconds: int = 30
+    embedding_dimensions: int = 768
+    qdrant_storage_path: Path = Path("./data/qdrant")
+    qdrant_collection_name: str = "documents"

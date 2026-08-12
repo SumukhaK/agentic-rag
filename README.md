@@ -82,8 +82,26 @@ Shipped (`src/agentic_rag/ingestion/`):
 - `sync_folder()` — the ingestion-cycle entrypoint tying all of the above
   together and propagating edits/deletions (FR4)
 
-**Phase 2 — Indexing Layer: not started.** Qdrant setup, HNSW + native
-hybrid search, embedding generation/caching.
+**Phase 2 — Indexing Layer: complete.**
+
+Shipped (`src/agentic_rag/indexing/`, `src/agentic_rag/embedding/`):
+- Qdrant collection setup — local/embedded mode (no Docker in this dev
+  environment), HNSW by default, named dense + sparse vectors set up for
+  hybrid search from the start
+- Dense embeddings via `nomic-embed-text` (Ollama), sparse (BM25)
+  embeddings via `fastembed` — populating that hybrid schema
+- `index_document()` / `delete_document()` — embed a document's chunks and
+  upsert them as Qdrant points with citation/access-control payload.
+  Edit-safe (stale points can't survive a shrunk chunk count) and
+  idempotent (deterministic point IDs, safe to retry); embeds *before*
+  deleting, so a transient embedding failure can't silently vanish an
+  already-indexed document
+- An embedding cache shared across `index_document()` calls, so repeated
+  content across different documents skips re-embedding (verified live:
+  ~6.6s → ~0.006s on a cache hit)
+
+**Phase 3 — Retrieval Pipeline: not started.** Parallel hybrid search,
+fusion to top 10, reranking to top 4.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

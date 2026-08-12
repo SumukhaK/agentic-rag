@@ -1,0 +1,193 @@
+# Agentic RAG — Requirements & Implementation Guidelines
+
+Product and system specification. This is the source of truth for *what* the
+system does. For *how* work is carried out in this repo (TDD, branching, PR
+review, secrets, config), see [`.claude/CLAUDE.md`](../.claude/CLAUDE.md).
+
+The original prompt this document was distilled from is recorded verbatim in
+[`PROJECT_TRACKER.md`](../PROJECT_TRACKER.md).
+
+---
+
+## 1. Vision
+
+A production-grade agentic RAG system that answers questions grounded strictly
+in an indexed document corpus, with per-user access control, source citations,
+and multi-turn conversation support. The system must be fast, reliable, and
+honest about the limits of what it knows.
+
+## 2. Scale & Non-Functional Targets
+
+- Must handle a corpus of **at least 10,000 documents**, averaging **~50 pages**
+  each (≈500,000 pages).
+- Must be **fast and reliable** — retrieval and generation latency are first-class
+  design constraints, not an afterthought (this is why caching, ANN indexing,
+  and a bounded top-k pipeline are required — see §7–§9).
+- Index freshness: document **edits reflected within minutes**; document
+  **deletions reflected immediately**.
+
+## 3. Ingestion
+
+- Source documents may be of any file type. All documents are converted to
+  Markdown using [`markitdown`](https://github.com/microsoft/markitdown)
+  before any downstream processing (chunking, embedding, indexing).
+- Raw source files are treated as immutable inputs to the conversion step.
+
+## 4. Chunking Strategy
+
+- **Hybrid chunking**: chunk at a regular, fixed target size by default. When a
+  semantic unit (e.g. a section, list, or table) would otherwise be split
+  across a chunk boundary and lose context, extend/adjust the chunk to keep
+  that unit intact rather than cutting it mid-way.
+- Exact target chunk size, overlap size, and the boundary-detection heuristic
+  are implementation details to be settled in Phase 1 (see `PROJECT_TRACKER.md`),
+  and must live in the central config module, not hardcoded.
+
+## 5. Indexing
+
+- **Vector store: Qdrant**, using **HNSW** indexing for approximate nearest
+  neighbor search over dense embeddings.
+- **Hybrid search backend: Qdrant native hybrid search** (sparse + dense
+  vectors in the same database), rather than standing up a separate keyword
+  search engine (e.g. Elasticsearch/OpenSearch). Chosen to minimize the number
+  of stateful services that must be run and kept in sync.
+- Every indexed chunk carries metadata required for downstream filtering:
+  source document ID, exact source location (for citation), and the
+  **access-level/role tag(s)** required to view it (see §11).
+- Embedding model: `nomic-embed-text`, served locally via Ollama.
+
+## 6. Retrieval Pipeline (query journey)
+
+End-to-end path from a user query to an answer. See `README.md` for the
+visual diagram; this is the authoritative step list:
+
+1. **User query** arrives from the browser/UI.
+2. **Orchestrator** rewrites conversation history and the incoming query into
+   a single, self-contained query (contextualization for multi-turn chat —
+   see §10). This happens on every new user turn.
+3. **Embedding**: the rewritten query is embedded (`nomic-embed-text`).
+4. **Parallel hybrid search**: dense vector search and sparse/keyword (BM25)
+   search run in parallel against Qdrant, each contributing candidates.
+5. **Fusion**: the two result sets are merged/fused into a single ranked list;
+   the **top 10** combined candidates are kept.
+6. **Reranking**: a **local open-source cross-encoder** (e.g.
+   `BAAI/bge-reranker-v2-m3`, run locally) reranks the top 10 and selects the
+   **top 4** chunks.
+7. **Generation**: the top 4 chunks + the grounding rules (§8) + the
+   (rewritten) user query are assembled into the final prompt and sent to the
+   generation LLM (Mistral/Mixtral via Ollama) to produce the answer.
+
+All retrieval (step 4 onward) is subject to the access-control filter in §11
+— a candidate the user isn't permitted to see must never reach step 5, let
+alone be cited in an answer.
+
+## 7. Caching
+
+Two caching layers, both required, to meet the speed/reliability target:
+
+- **Embedding cache**: avoid recomputing embeddings for text (queries or
+  chunks) that has already been embedded.
+- **Semantic cache**: cache answers keyed on query *meaning*, so
+  semantically-similar repeat questions can be served without re-running the
+  full retrieval + generation pipeline.
+
+Cache backend, eviction policy, and semantic-similarity threshold for cache
+hits are implementation details for the relevant phase in `PROJECT_TRACKER.md`.
+
+## 8. Grounding & Answer Rules
+
+These rules apply to every answer the system produces, with no exceptions:
+
+1. Every factual answer **cites its source** (document + exact chunk) **and**
+   the access level that source requires.
+2. If the retrieved sources don't contain the answer, the system responds:
+   **"I do not know the answer based on indexed documents."** — this is the
+   single canonical fallback message, used everywhere the system cannot
+   ground an answer (including when the sub-question decomposition loop in
+   §10 is exhausted).
+3. The system **never** uses knowledge outside the retrieved/sourced
+   documents to generate an answer — no reliance on the LLM's parametric
+   knowledge for factual claims.
+
+## 9. Functional Requirements
+
+| ID | Requirement |
+|---|---|
+| FR1 | Answer questions from the corpus with citations to the exact source chunk(s). |
+| FR2 | Support multi-turn chat: each turn inherits context (history) from previous turns in the same conversation. |
+| FR3 | Enforce per-user document permissions (see §11); a user must never see content, or an answer derived from content, above their access level. |
+| FR4 | Reflect document edits within minutes and document deletions immediately in retrieval results. |
+| FR5 | Say "I do not know" (§8, rule 2) when the corpus has no answer, rather than guessing. |
+
+## 10. Multi-Turn Chat & Query Decomposition
+
+- **History rewriting**: on every new user query, the orchestrator rewrites
+  the conversation history plus the new query into one self-contained query
+  before it enters the retrieval pipeline (§6, step 2). This is what makes
+  FR2 (multi-turn context) work.
+- **Sub-question decomposition**: a complex question may be split into
+  sub-questions, each run through the retrieval pipeline independently.
+- **Retry/replanning loop**: if the evidence retrieved for a (sub-)question is
+  insufficient to answer it, the system returns to planning and retries —
+  up to **5 turns** total.
+- If, after 5 turns, no sufficiently-evidenced answer was found, the system
+  returns the canonical fallback message from §8 rule 2. (A single message is
+  used for all "couldn't answer" cases — see the design-decisions log in §13.)
+
+## 11. Access Control
+
+- Every document/chunk carries an access-level tag.
+- **Model: simple linear tiers.** Access levels form a single ordered list
+  (lowest → highest); a user at a given tier can see content tagged at their
+  tier **or any tier below it**, matching the stated example ("developer"
+  can't see "manager"-only docs; a "manager" can see "developer"-level docs).
+- The ordered tier list itself is **configuration, not hardcoded** — it lives
+  in the central config module (`.claude/CLAUDE.md` §5) so the real
+  organizational role names can be supplied without a code change. A
+  placeholder tier list (e.g. `tier-1 < tier-2 < tier-3`) is used for
+  development/tests until the real list is provided.
+- Access filtering happens **at retrieval time** (§6, step 4/5) — a chunk the
+  user isn't permitted to see must be excluded before fusion/reranking, not
+  filtered out after the fact.
+
+## 12. Safety & Security Controls
+
+- **Access control** — covered by §11; the first line of defense.
+- **Prompt injection detection**: incoming user queries are screened by an
+  LLM-based judge for injection attempts before being used in retrieval or
+  generation.
+- **Output/citation validation**: before an answer is returned, its citation
+  links and the underlying chunks are checked for security threats or
+  malfunction (e.g. a citation pointing to a chunk the user isn't permitted
+  to see, or content indicating a successful injection).
+- **Foul language refusal**: the system refuses to engage with foul/abusive
+  language at any stage of the conversation.
+- Which model performs the injection judge and output-validation checks (the
+  local generation model vs. Claude) is an open item — see §14.
+
+## 13. Resolved Design Decisions
+
+Log of decisions made explicitly during planning, for traceability:
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Access control model | Simple linear tiers (configurable list) | Simplest to implement/reason about; matches the stated example |
+| Keyword search backend | Qdrant native hybrid (sparse+dense) | One database instead of two stateful services |
+| Reranker | Local open-source cross-encoder (`bge-reranker-v2-m3`-class) | Consistent with local-first/open-source generation stack |
+| Fallback message | Single canonical message everywhere | Simpler to test and guarantee consistency of |
+
+## 14. Open Items (need a decision before the relevant phase starts)
+
+- **Injection judge / output validation model**: local model (fast, no
+  external cost) vs. Claude (likely higher judgment quality, adds latency +
+  external API dependency). Needs a decision before Phase 6.
+- **Document source-of-truth**: where do source documents originate (upload
+  API, watched filesystem/folder, an external system)? This determines how
+  the "edits within minutes / deletions immediately" requirement (FR4) is
+  actually implemented (polling vs. push/webhook vs. filesystem watch). Needs
+  a decision before Phase 1.
+- **Real access-tier names**: the linear tier list is a placeholder (§11)
+  until the actual organizational roles are provided.
+- **Exact chunk size / overlap** for hybrid chunking (§4).
+- **Cache backend and semantic-similarity threshold** for the semantic cache
+  (§7).

@@ -55,9 +55,14 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
 
 ## Phase 2 — Indexing Layer
 
-- [ ] Qdrant setup with HNSW indexing (dense vectors) — local/embedded mode
-      (no Docker in this environment), swappable for a real server via config
-- [ ] Qdrant native hybrid search enabled (sparse + dense)
+- [x] Qdrant setup with HNSW indexing (dense vectors): `get_client()`/
+      `ensure_collection()` — local/embedded mode (on-disk storage, no
+      Docker in this environment), swappable for a real server later.
+      Qdrant indexes dense vectors with HNSW by default, so creating a
+      standard collection already satisfies this; verified live (default
+      HNSW config: m=16, ef_construct=100)
+      (`src/agentic_rag/indexing/qdrant_setup.py`)
+- [ ] Qdrant native hybrid search enabled (sparse + dense) (next)
 - [x] Embedding generation via `nomic-embed-text` (Ollama):
       `embed_texts()` calls Ollama's batch-capable `/api/embed` endpoint
       (one HTTP round-trip for many chunks), with `embed_text()` as a

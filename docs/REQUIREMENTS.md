@@ -32,6 +32,11 @@ honest about the limits of what it knows.
   Markdown using [`markitdown`](https://github.com/microsoft/markitdown)
   before any downstream processing (chunking, embedding, indexing).
 - Raw source files are treated as immutable inputs to the conversion step.
+- **Source-of-truth: a watched folder/filesystem.** A configured directory
+  (path set in the central config module, see `.claude/CLAUDE.md` §5) is the
+  corpus's source of truth. New, modified, and deleted files in that folder
+  drive ingestion — there is no separate upload API or external-system sync
+  in this phase.
 
 ## 4. Chunking Strategy
 
@@ -175,17 +180,13 @@ Log of decisions made explicitly during planning, for traceability:
 | Keyword search backend | Qdrant native hybrid (sparse+dense) | One database instead of two stateful services |
 | Reranker | Local open-source cross-encoder (`bge-reranker-v2-m3`-class) | Consistent with local-first/open-source generation stack |
 | Fallback message | Single canonical message everywhere | Simpler to test and guarantee consistency of |
+| Document source-of-truth | Watched folder/filesystem | No separate upload service to build; fits documents already managed as files |
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 
 - **Injection judge / output validation model**: local model (fast, no
   external cost) vs. Claude (likely higher judgment quality, adds latency +
   external API dependency). Needs a decision before Phase 6.
-- **Document source-of-truth**: where do source documents originate (upload
-  API, watched filesystem/folder, an external system)? This determines how
-  the "edits within minutes / deletions immediately" requirement (FR4) is
-  actually implemented (polling vs. push/webhook vs. filesystem watch). Needs
-  a decision before Phase 1.
 - **Real access-tier names**: the linear tier list is a placeholder (§11)
   until the actual organizational roles are provided.
 - **Exact chunk size / overlap** for hybrid chunking (§4).

@@ -15,5 +15,5 @@ class Settings(BaseSettings):
     embedding_model: str = "nomic-embed-text"
     embedding_timeout_seconds: int = 30
     embedding_dimensions: int = 768
-    qdrant_storage_path: str = "./data/qdrant"
+    qdrant_storage_path: Path = Path("./data/qdrant")
     qdrant_collection_name: str = "documents"

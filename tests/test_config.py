@@ -105,7 +105,7 @@ def test_settings_defaults_qdrant_settings(monkeypatch):
     settings = Settings()
 
     assert settings.embedding_dimensions == 768
-    assert settings.qdrant_storage_path == "./data/qdrant"
+    assert settings.qdrant_storage_path == Path("./data/qdrant")
     assert settings.qdrant_collection_name == "documents"
 
 
@@ -118,5 +118,5 @@ def test_settings_qdrant_settings_overridable_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.embedding_dimensions == 1024
-    assert settings.qdrant_storage_path == "/data/prod-qdrant"
+    assert settings.qdrant_storage_path == Path("/data/prod-qdrant")
     assert settings.qdrant_collection_name == "football_docs"

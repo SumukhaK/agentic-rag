@@ -60,7 +60,11 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       Docker in this environment), swappable for a real server later.
       Qdrant indexes dense vectors with HNSW by default, so creating a
       standard collection already satisfies this; verified live (default
-      HNSW config: m=16, ef_construct=100)
+      HNSW config: m=16, ef_construct=100). Collection created with named
+      dense (`"dense"`) + sparse (`"sparse"`) vectors from the start, since
+      Qdrant can't add a sparse field to an existing collection later, and
+      raises `CollectionSchemaMismatchError` instead of silently no-opping
+      if the dense vector size doesn't match what's requested
       (`src/agentic_rag/indexing/qdrant_setup.py`)
 - [ ] Qdrant native hybrid search enabled (sparse + dense) (next)
 - [x] Embedding generation via `nomic-embed-text` (Ollama):

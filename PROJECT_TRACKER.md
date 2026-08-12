@@ -31,7 +31,9 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
 - [x] Hybrid chunking: fixed target size (`CHUNK_SIZE_CHARS`, default 2000)
       with boundary-aware extension for oversized blocks
       (`src/agentic_rag/ingestion/chunker.py::chunk_markdown`)
-- [ ] Wire chunker into the ingestion pipeline (`process_changes`) (next)
+- [x] Wire chunker into the ingestion pipeline (`process_changes` now
+      returns each document with its `chunks`)
+- [ ] Access-level tagging on ingested documents/chunks (next)
 - [ ] Access-level tagging on ingested documents/chunks
 - [ ] Edit/delete propagation (edits in minutes, deletes immediately)
 - [ ] Schema + validation for processed documents

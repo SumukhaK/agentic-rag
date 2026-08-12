@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from agentic_rag.ingestion.chunker import Chunk, chunk_markdown
 from agentic_rag.ingestion.converter import convert_to_markdown
 from agentic_rag.ingestion.watcher import FolderChanges
 
@@ -11,10 +12,13 @@ from agentic_rag.ingestion.watcher import FolderChanges
 class IngestedDocument:
     relative_path: str
     markdown: str
+    chunks: list[Chunk]
 
 
-def process_changes(folder: Path, changes: FolderChanges) -> list[IngestedDocument]:
-    """Convert every created/modified file in `changes` to Markdown.
+def process_changes(
+    folder: Path, changes: FolderChanges, chunk_size_chars: int
+) -> list[IngestedDocument]:
+    """Convert and chunk every created/modified file in `changes`.
 
     Deletions carry nothing to convert; propagating them to the index is
     the indexing phase's responsibility, not this pipeline step's.
@@ -22,7 +26,10 @@ def process_changes(folder: Path, changes: FolderChanges) -> list[IngestedDocume
     documents = []
     for relative_path in changes.created + changes.modified:
         markdown = convert_to_markdown(folder / relative_path)
+        chunks = chunk_markdown(markdown, chunk_size_chars)
         documents.append(
-            IngestedDocument(relative_path=relative_path, markdown=markdown)
+            IngestedDocument(
+                relative_path=relative_path, markdown=markdown, chunks=chunks
+            )
         )
     return documents

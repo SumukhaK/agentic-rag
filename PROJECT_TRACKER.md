@@ -16,7 +16,8 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
 - [x] `docs/REQUIREMENTS.md` — product & system requirements
 - [x] `PROJECT_TRACKER.md` — this file
 - [x] `README.md` — high-level architecture diagram
-- [ ] `.env.example` + central config module skeleton
+- [x] `.env.example` + central config module skeleton (built incrementally
+      alongside the Phase 1 features that needed each setting)
 
 ## Phase 1 — Data Ingestion & Processing
 
@@ -36,8 +37,13 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
 - [x] Access-level tagging: folder-per-tier convention, validated against the
       configured `ACCESS_TIERS` list, wired into `process_changes`
       (`src/agentic_rag/ingestion/tagger.py`)
-- [ ] Edit/delete propagation (edits in minutes, deletes immediately) (next)
-- [ ] Schema + validation for processed documents
+- [x] Edit/delete propagation: `sync_folder()` ties `watcher.snapshot`/
+      `diff_snapshots` and `pipeline.process_changes` into one ingestion-cycle
+      entrypoint, returning documents, failures, deleted paths, and the
+      snapshot to persist for the next cycle
+      (`src/agentic_rag/ingestion/sync.py`). Scheduling how often this runs
+      (the "minutes"/"immediately" timing from FR4) is Phase 7's job.
+- [ ] Schema + validation for processed documents (next)
 
 ## Phase 2 — Indexing Layer
 

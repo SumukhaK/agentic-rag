@@ -13,3 +13,4 @@ class Settings(BaseSettings):
     access_tiers: list[str] = ["tier-1", "tier-2", "tier-3"]
     ollama_base_url: str = "http://localhost:11434"
     embedding_model: str = "nomic-embed-text"
+    embedding_timeout_seconds: int = 30

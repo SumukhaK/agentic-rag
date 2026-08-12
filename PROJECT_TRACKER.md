@@ -59,9 +59,11 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       (no Docker in this environment), swappable for a real server via config
 - [ ] Qdrant native hybrid search enabled (sparse + dense)
 - [x] Embedding generation via `nomic-embed-text` (Ollama):
-      `embed_text()` calls Ollama's `/api/embeddings` endpoint, tested with
-      mocked HTTP and smoke-tested against the real local Ollama server
-      (`src/agentic_rag/embedding/ollama_client.py`)
+      `embed_texts()` calls Ollama's batch-capable `/api/embed` endpoint
+      (one HTTP round-trip for many chunks), with `embed_text()` as a
+      single-item convenience wrapper. Tested with mocked HTTP (including
+      malformed-response cases) and smoke-tested against the real local
+      Ollama server (`src/agentic_rag/embedding/ollama_client.py`)
 - [ ] Embedding cache
 
 ## Phase 3 — Retrieval Pipeline

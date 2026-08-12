@@ -77,3 +77,21 @@ def test_settings_ollama_base_url_and_embedding_model_overridable_from_env(monke
 
     assert settings.ollama_base_url == "http://ollama.internal:11434"
     assert settings.embedding_model == "some-other-embedding-model"
+
+
+def test_settings_defaults_embedding_timeout_seconds(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("EMBEDDING_TIMEOUT_SECONDS", raising=False)
+
+    settings = Settings()
+
+    assert settings.embedding_timeout_seconds == 30
+
+
+def test_settings_embedding_timeout_seconds_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("EMBEDDING_TIMEOUT_SECONDS", "60")
+
+    settings = Settings()
+
+    assert settings.embedding_timeout_seconds == 60

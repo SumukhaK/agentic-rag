@@ -75,7 +75,10 @@ honest about the limits of what it knows.
   source document ID, exact source location (for citation), and the
   **access-level/role tag(s)** required to view it (see §11).
 - Embedding model: `nomic-embed-text`, served locally via Ollama (pulled and
-  verified working — 768-dimensional vectors — during Phase 2).
+  verified working — 768-dimensional vectors — during Phase 2). Embedding
+  calls use Ollama's batch-capable `/api/embed` endpoint (many texts in one
+  HTTP round-trip) rather than the older single-prompt `/api/embeddings`,
+  since indexing will need to embed every chunk of every document.
 - **Qdrant deployment: local/embedded mode for now.** Docker isn't available
   in this dev environment, so Qdrant runs via `qdrant-client`'s built-in
   local mode (on-disk storage, no server process) rather than a container.

@@ -67,9 +67,14 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       if the dense vector size doesn't match what's requested
       (`src/agentic_rag/indexing/qdrant_setup.py`)
 - [~] Qdrant native hybrid search enabled (sparse + dense):
-      `embed_sparse_texts()` — BM25 via `fastembed` (`Qdrant/bm25`), tested
-      for real (no mocking - deterministic, local, same precedent as
-      `markitdown`) (`src/agentic_rag/embedding/sparse_client.py`).
+      `embed_sparse_texts()` — BM25 via `fastembed` (`Qdrant/bm25`),
+      returns `qdrant_client`'s own `SparseVector` type directly (no
+      translation step needed at upsert time). Tested for real (no
+      mocking, to verify actual determinism); tests skip gracefully via an
+      `autouse` fixture if the model can't be loaded, since `fastembed`
+      caches to the OS temp directory, not a stable location — see the
+      correction in `docs/REQUIREMENTS.md` §5
+      (`src/agentic_rag/embedding/sparse_client.py`).
       Wiring dense+sparse embeddings into actual Qdrant upserts is next.
 - [x] Embedding generation via `nomic-embed-text` (Ollama):
       `embed_texts()` calls Ollama's batch-capable `/api/embed` endpoint

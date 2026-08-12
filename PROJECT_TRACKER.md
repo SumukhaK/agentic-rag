@@ -55,9 +55,13 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
 
 ## Phase 2 — Indexing Layer
 
-- [ ] Qdrant setup with HNSW indexing (dense vectors)
+- [ ] Qdrant setup with HNSW indexing (dense vectors) — local/embedded mode
+      (no Docker in this environment), swappable for a real server via config
 - [ ] Qdrant native hybrid search enabled (sparse + dense)
-- [ ] Embedding generation via `nomic-embed-text` (Ollama)
+- [x] Embedding generation via `nomic-embed-text` (Ollama):
+      `embed_text()` calls Ollama's `/api/embeddings` endpoint, tested with
+      mocked HTTP and smoke-tested against the real local Ollama server
+      (`src/agentic_rag/embedding/ollama_client.py`)
 - [ ] Embedding cache
 
 ## Phase 3 — Retrieval Pipeline

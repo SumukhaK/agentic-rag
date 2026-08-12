@@ -11,3 +11,5 @@ class Settings(BaseSettings):
     watched_folder_path: Path
     chunk_size_chars: int = 2000
     access_tiers: list[str] = ["tier-1", "tier-2", "tier-3"]
+    ollama_base_url: str = "http://localhost:11434"
+    embedding_model: str = "nomic-embed-text"

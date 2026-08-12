@@ -55,3 +55,25 @@ def test_settings_access_tiers_overridable_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.access_tiers == ["developer", "manager", "director"]
+
+
+def test_settings_defaults_ollama_base_url_and_embedding_model(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("EMBEDDING_MODEL", raising=False)
+
+    settings = Settings()
+
+    assert settings.ollama_base_url == "http://localhost:11434"
+    assert settings.embedding_model == "nomic-embed-text"
+
+
+def test_settings_ollama_base_url_and_embedding_model_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.internal:11434")
+    monkeypatch.setenv("EMBEDDING_MODEL", "some-other-embedding-model")
+
+    settings = Settings()
+
+    assert settings.ollama_base_url == "http://ollama.internal:11434"
+    assert settings.embedding_model == "some-other-embedding-model"

@@ -66,7 +66,11 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       raises `CollectionSchemaMismatchError` instead of silently no-opping
       if the dense vector size doesn't match what's requested
       (`src/agentic_rag/indexing/qdrant_setup.py`)
-- [ ] Qdrant native hybrid search enabled (sparse + dense) (next)
+- [~] Qdrant native hybrid search enabled (sparse + dense):
+      `embed_sparse_texts()` — BM25 via `fastembed` (`Qdrant/bm25`), tested
+      for real (no mocking - deterministic, local, same precedent as
+      `markitdown`) (`src/agentic_rag/embedding/sparse_client.py`).
+      Wiring dense+sparse embeddings into actual Qdrant upserts is next.
 - [x] Embedding generation via `nomic-embed-text` (Ollama):
       `embed_texts()` calls Ollama's batch-capable `/api/embed` endpoint
       (one HTTP round-trip for many chunks), with `embed_text()` as a

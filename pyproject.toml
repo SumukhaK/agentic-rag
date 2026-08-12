@@ -8,6 +8,7 @@ dependencies = [
     "markitdown>=0.1.0",
     "requests>=2.31",
     "qdrant-client>=1.12",
+    "fastembed>=0.4",
 ]
 
 [dependency-groups]

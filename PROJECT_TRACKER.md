@@ -86,7 +86,7 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       malformed-response cases) and smoke-tested against the real local
       Ollama server (`src/agentic_rag/embedding/ollama_client.py`)
 - [x] Embedding cache: `EmbeddingCache` + `embed_with_cache()` — in-memory,
-      keyed on `(model, sha256(text))`, generic over dense and sparse.
+      keyed on `(model, text)`, generic over dense and sparse.
       Wired into `index_document()` via a required `embedding_cache` param
       shared across calls, so repeated chunk text across different
       documents in the same run skips re-embedding. Verified live: cache

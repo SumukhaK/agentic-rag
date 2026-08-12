@@ -1,3 +1,5 @@
+import pytest
+
 from agentic_rag.embedding.cache import EmbeddingCache, embed_with_cache
 
 
@@ -58,3 +60,34 @@ def test_embed_with_cache_keys_are_scoped_per_model():
 
     # Same text, different model - both must be embedded, not conflated.
     assert calls == [["text"], ["text"]]
+
+
+def test_embed_with_cache_raises_when_embed_fn_returns_fewer_results_than_requested():
+    cache = EmbeddingCache()
+
+    def embed_fn(batch):
+        # Simulates a malformed/incomplete response: 2 texts requested,
+        # only 1 result returned.
+        return [[1]]
+
+    with pytest.raises(ValueError):
+        embed_with_cache(["one", "two"], model="m", cache=cache, embed_fn=embed_fn)
+
+
+def test_embed_with_cache_does_not_cache_partial_results_on_mismatch():
+    cache = EmbeddingCache()
+    call_count = 0
+
+    def embed_fn(batch):
+        nonlocal call_count
+        call_count += 1
+        return [[1]]  # always short by one
+
+    with pytest.raises(ValueError):
+        embed_with_cache(["one", "two"], model="m", cache=cache, embed_fn=embed_fn)
+
+    # Nothing from the failed batch should have been cached - a retry
+    # shouldn't see a stale, incomplete partial result.
+    assert cache.get("m", "one") is None
+    assert cache.get("m", "two") is None
+    assert call_count == 1

@@ -1,4 +1,3 @@
-import hashlib
 from typing import Callable, TypeVar
 
 T = TypeVar("T")
@@ -9,20 +8,19 @@ class EmbeddingCache:
 
     Scoped to the process's lifetime, not persisted across restarts - see
     docs/REQUIREMENTS.md §7 for why that's a deliberate, documented choice
-    for this first version rather than an oversight.
+    for this first version rather than an oversight. Also unbounded (no
+    eviction) - fine for one sync cycle at a time, but §7 already flags
+    eviction policy as an explicit open item, not something to invent here.
     """
 
     def __init__(self) -> None:
         self._store: dict[tuple[str, str], object] = {}
 
-    def _key(self, model: str, text: str) -> tuple[str, str]:
-        return (model, hashlib.sha256(text.encode()).hexdigest())
-
     def get(self, model: str, text: str) -> object | None:
-        return self._store.get(self._key(model, text))
+        return self._store.get((model, text))
 
     def set(self, model: str, text: str, value: object) -> None:
-        self._store[self._key(model, text)] = value
+        self._store[(model, text)] = value
 
 
 def embed_with_cache(
@@ -48,6 +46,17 @@ def embed_with_cache(
     if missing_indices:
         missing_texts = [texts[i] for i in missing_indices]
         fresh = embed_fn(missing_texts)
+
+        if len(fresh) != len(missing_texts):
+            # Validate before caching anything from this batch: a partial
+            # result cached now would look like a legitimate hit on retry,
+            # masking the same malformed-response class of bug this check
+            # exists to catch.
+            raise ValueError(
+                f"embed_fn returned {len(fresh)} result(s) for "
+                f"{len(missing_texts)} requested text(s)"
+            )
+
         for index, vector in zip(missing_indices, fresh):
             cache.set(model, texts[index], vector)
             results[index] = vector

@@ -66,16 +66,19 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       raises `CollectionSchemaMismatchError` instead of silently no-opping
       if the dense vector size doesn't match what's requested
       (`src/agentic_rag/indexing/qdrant_setup.py`)
-- [~] Qdrant native hybrid search enabled (sparse + dense):
+- [x] Qdrant native hybrid search enabled (sparse + dense):
       `embed_sparse_texts()` — BM25 via `fastembed` (`Qdrant/bm25`),
-      returns `qdrant_client`'s own `SparseVector` type directly (no
-      translation step needed at upsert time). Tested for real (no
-      mocking, to verify actual determinism); tests skip gracefully via an
-      `autouse` fixture if the model can't be loaded, since `fastembed`
-      caches to the OS temp directory, not a stable location — see the
-      correction in `docs/REQUIREMENTS.md` §5
-      (`src/agentic_rag/embedding/sparse_client.py`).
-      Wiring dense+sparse embeddings into actual Qdrant upserts is next.
+      returns `qdrant_client`'s own `SparseVector` type directly
+      (`src/agentic_rag/embedding/sparse_client.py`). `index_document()` /
+      `delete_document()` (`src/agentic_rag/indexing/upsert.py`) embed
+      each chunk with both dense (Ollama) and sparse (BM25) vectors and
+      upsert them as Qdrant points, with citation/access-control payload
+      (`relative_path`, `chunk_index`, `text`, `access_tier`). Deterministic
+      point IDs (uuid5 of path+chunk index) make re-indexing idempotent;
+      existing points for a document are deleted before its current chunk
+      set is inserted, so an edit that reduces the chunk count doesn't
+      leave stale points behind. Verified end-to-end against the real
+      Ollama server and a real local Qdrant collection.
 - [x] Embedding generation via `nomic-embed-text` (Ollama):
       `embed_texts()` calls Ollama's batch-capable `/api/embed` endpoint
       (one HTTP round-trip for many chunks), with `embed_text()` as a

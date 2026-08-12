@@ -87,7 +87,18 @@ honest about the limits of what it knows.
   network access every run.
 - Every indexed chunk carries metadata required for downstream filtering:
   source document ID, exact source location (for citation), and the
-  **access-level/role tag(s)** required to view it (see §11).
+  **access-level/role tag(s)** required to view it (see §11). Implemented
+  as the Qdrant point payload: `relative_path`, `chunk_index`, `text` (the
+  chunk's own content, for citation without a second lookup), and
+  `access_tier`.
+- **Upsert is idempotent and edit-safe.** `index_document()` deletes all
+  existing points for a document's `relative_path` before inserting its
+  current chunk set, so an edit that reduces the chunk count can't leave
+  orphaned, stale points searchable forever. Point IDs are deterministic
+  (`uuid5` of `relative_path` + chunk index), so re-running
+  `index_document()` for the same document converges to the same points
+  instead of accumulating duplicates — this matters once Phase 7 puts
+  ingestion on a schedule that may retry.
 - Embedding model: `nomic-embed-text`, served locally via Ollama (pulled and
   verified working — 768-dimensional vectors — during Phase 2). Embedding
   calls use Ollama's batch-capable `/api/embed` endpoint (many texts in one

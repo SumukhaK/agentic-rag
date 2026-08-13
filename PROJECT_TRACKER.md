@@ -200,10 +200,65 @@ building unwired infrastructure to fill the slot.
 
 ## Phase 5 — Generation & Grounding
 
-- [ ] Prompt assembly: top-4 chunks + grounding rules + query
-- [ ] Generation via `mistral` (Ollama) — reuses `generate()` from Phase 4
-- [ ] Citation enforcement (source + access level on every factual claim)
-- [ ] No-outside-knowledge enforcement
+- [x] Prompt assembly + generation via `mistral`: `generate_answer()`
+      (`src/agentic_rag/orchestration/answer.py`) — takes a `PlanningResult`
+      straight from Phase 4's `plan_and_retrieve()`. If insufficient,
+      returns `planning_result.message` (the canonical fallback) directly
+      with **no LLM call** — nothing to ground an answer in, so calling the
+      model would only risk it reaching for outside knowledge. Otherwise
+      flattens+deduplicates candidates across every sub-question's outcome
+      (the same chunk can be evidence for more than one sub-question — a
+      dedup by `(relative_path, chunk_index)` keeps it out of the prompt
+      twice) into a citation-numbered source list (`[1]`, `[2]`, ...,
+      each labelled with its source path, **chunk index**, and access tier)
+      and calls `generate()`. Reconciles the original architecture's "top 4
+      chunks" framing with Phase 4's decomposition: with N sub-questions the
+      evidence set is N × `rerank_top_k` before dedup, not a fixed 4 — the
+      original figure described the single-question case before
+      decomposition existed
+- [x] Citation enforcement + no-outside-knowledge enforcement (§8 rules 1
+      and 3): encoded in the generation prompt (cite `[N]` per claim, never
+      use knowledge beyond the numbered sources) **and validated after the
+      fact** — self-review on PR #25 correctly called out that prompt-only
+      enforcement can't satisfy a rule stated as having "no exceptions",
+      since prompt-following is probabilistic. `_is_grounded()` now checks
+      every returned answer: it must be the canonical fallback verbatim, or
+      cite at least one source number that's actually in range
+      (`1..len(candidates)`). An answer with zero citations, or a citation
+      to a source that doesn't exist (worse than none — it carries false
+      authority), is replaced with `CANNOT_ANSWER_MESSAGE` rather than
+      returned as-is. Citations now also identify the exact chunk (not just
+      the file), per §8 rule 1's literal wording — the first version's
+      citation label only had the file path, missed by every finder angle
+      except one on the first review pass
+- [x] "I do not know" enforcement (§8 rule 2), **verified live as a working
+      second line of defense**: the retrieval-only `sufficient` signal
+      (Phase 4) is coarse and can be `True` even when nothing relevant was
+      actually found (a 1-document corpus returns *something* for any
+      query). Live-tested against the real Ollama/Qdrant stack: asking
+      "What is the capital of France?" against a football-only corpus
+      still resolved `sufficient=True` from `plan_and_retrieve`, but
+      `generate_answer()`'s prompt-level instruction caught what the
+      retrieval signal missed — `mistral` correctly returned
+      `CANNOT_ANSWER_MESSAGE` verbatim instead of fabricating an answer
+      from the irrelevant chunk. This is exactly the deferred-to-Phase-5
+      answerability judgment Phase 4's docstring anticipated
+- [x] Self-review hardening (PR #25): `PlanningResult.message` was typed
+      `str | None` with nothing enforcing it's non-`None` when
+      `sufficient=False` — `generate_answer()`'s `-> str` signature could
+      silently return `None` if a future caller constructed a mismatched
+      `PlanningResult` by hand. Fixed with a `__post_init__` invariant on
+      `PlanningResult` itself (the right layer to enforce it, not every
+      consumer) raising `ValueError` on construction if `sufficient` and
+      `message` disagree. Also added a defensive fallback in
+      `generate_answer()` for `sufficient=True` with zero actual candidates
+      (not reachable via `plan_and_retrieve` today, but not guaranteed by
+      `answer.py` itself either) — returns the canonical fallback rather
+      than firing a pointless LLM call over an empty source list.
+      **Known, deliberately deferred**: no bound on assembled prompt size
+      as sub-question count grows (flagged by the efficiency review angle;
+      needs a token-budgeting design decision, not a quick fix — noted here
+      rather than guessed at)
 - [ ] Claude-as-evaluator wiring (offline eval, not in the live answer path)
 - [ ] Semantic cache (query-meaning-keyed answer cache) — moved from Phase 3;
       needs a decision on cache backend and similarity threshold, see

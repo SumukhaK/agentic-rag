@@ -145,6 +145,29 @@ Shipped (`src/agentic_rag/orchestration/`, `src/agentic_rag/generation/`):
   `RerankError`) cost one retry attempt instead of aborting the whole
   call; `UnknownAccessTierError` (a config error) still fails fast
 
+**Phase 5 — Generation & Grounding: in progress.**
+
+Shipped (`src/agentic_rag/orchestration/answer.py`):
+- `generate_answer()` — takes Phase 4's `PlanningResult` straight through
+  to a final answer. Returns the canonical fallback with no LLM call when
+  retrieval was insufficient; otherwise deduplicates candidates across all
+  sub-questions into a citation-numbered (`[1]`, `[2]`, ...) source list —
+  each labelled with its path, chunk index, and access tier — and prompts
+  `mistral` to answer using only those sources, citing every claim, and
+  falling back to the canonical message if they don't suffice
+- Citations are validated, not just requested: `_is_grounded()` checks the
+  returned answer is either the canonical fallback verbatim or cites at
+  least one in-range source number; an uncited or hallucinated-citation
+  answer is replaced with the fallback rather than returned as-is — prompt
+  instructions alone can't satisfy a grounding rule stated as having "no
+  exceptions"
+- Live-verified this is a genuine second line of defense, not a
+  formality: `plan_and_retrieve`'s coarse `sufficient` signal came back
+  `True` for "What is the capital of France?" against a football-only
+  corpus (retrieval always returns *something*), but `generate_answer()`
+  correctly returned the fallback anyway — the model recognized the
+  retrieved chunk didn't actually answer the question
+
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.
 

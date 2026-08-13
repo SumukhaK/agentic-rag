@@ -45,6 +45,17 @@ class PlanningResult:
     attempts_used: int
     message: str | None
 
+    def __post_init__(self) -> None:
+        # message is Optional at the type level only because dataclasses
+        # can't express "None iff sufficient" directly - callers like
+        # generate_answer() rely on message always being a real string
+        # when sufficient=False, so a mismatched construction must fail
+        # loudly here rather than surface as a silent None downstream.
+        if not self.sufficient and self.message is None:
+            raise ValueError("message is required when sufficient=False")
+        if self.sufficient and self.message is not None:
+            raise ValueError("message must be None when sufficient=True")
+
 
 def _retrieve_outcome(
     sub_question: str,

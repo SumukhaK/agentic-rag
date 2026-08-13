@@ -20,10 +20,15 @@ def embed_texts(
         )
         response.raise_for_status()
         return response.json()["embeddings"]
+    except (ValueError, KeyError) as exc:
+        # requests.exceptions.JSONDecodeError (raised by response.json() on
+        # a malformed body) is BOTH a ValueError and a RequestException, so
+        # this branch must be checked first - Ollama did respond, it just
+        # sent something unparseable; that's not the same failure as being
+        # unreachable, and the message shouldn't conflate the two.
+        raise EmbeddingError(f"unexpected response from Ollama: {exc}") from exc
     except requests.RequestException as exc:
         raise EmbeddingError(f"failed to reach Ollama: {exc}") from exc
-    except (ValueError, KeyError) as exc:
-        raise EmbeddingError(f"unexpected response from Ollama: {exc}") from exc
 
 
 def embed_text(text: str, model: str, base_url: str, timeout: int = 30) -> list[float]:

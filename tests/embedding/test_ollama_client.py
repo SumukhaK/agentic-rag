@@ -113,6 +113,26 @@ def test_embed_texts_raises_embedding_error_on_a_non_json_body(mock_post):
 
 
 @patch("agentic_rag.embedding.ollama_client.requests.post")
+def test_embed_texts_reports_a_non_json_body_as_an_unexpected_response_not_unreachable(
+    mock_post,
+):
+    # requests.exceptions.JSONDecodeError is BOTH a RequestException and a
+    # ValueError - if the except clauses are ordered wrong, this gets
+    # miscategorized as "failed to reach Ollama" when Ollama actually
+    # responded, just with a body that couldn't be parsed.
+    mock_post.return_value = _mock_response(
+        json_side_effect=requests.exceptions.JSONDecodeError("bad json", "", 0)
+    )
+
+    with pytest.raises(EmbeddingError, match="unexpected response"):
+        embed_texts(
+            ["Arsenal drew 1-1."],
+            model="nomic-embed-text",
+            base_url="http://localhost:11434",
+        )
+
+
+@patch("agentic_rag.embedding.ollama_client.requests.post")
 def test_embed_text_returns_a_single_embedding_vector(mock_post):
     mock_post.return_value = _mock_response(body={"embeddings": [[0.1, 0.2, 0.3]]})
 

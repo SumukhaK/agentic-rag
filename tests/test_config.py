@@ -178,3 +178,25 @@ def test_settings_reranker_settings_overridable_from_env(monkeypatch):
 
     assert settings.reranker_model == "some-other-reranker-model"
     assert settings.rerank_top_k == 6
+
+
+def test_settings_defaults_generation_settings(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    for key in ("GENERATION_MODEL", "GENERATION_TIMEOUT_SECONDS"):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = Settings()
+
+    assert settings.generation_model == "mistral"
+    assert settings.generation_timeout_seconds == 60
+
+
+def test_settings_generation_settings_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("GENERATION_MODEL", "some-other-generation-model")
+    monkeypatch.setenv("GENERATION_TIMEOUT_SECONDS", "90")
+
+    settings = Settings()
+
+    assert settings.generation_model == "some-other-generation-model"
+    assert settings.generation_timeout_seconds == 90

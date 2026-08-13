@@ -297,7 +297,11 @@ These rules apply to every answer the system produces, with no exceptions:
   **Implemented as** `decompose_query()`
   (`src/agentic_rag/orchestration/decompose.py`) — prompts `generate()`
   for one sub-question per line, stripping numbering/bullets the model
-  adds despite being told not to. Raises `GenerationError` if the LLM
+  adds despite being told not to — the marker regex requires whitespace
+  or end-of-line right after "N."/"N)", so it correctly leaves a
+  sub-question that starts with a decimal stat (e.g. "1.85 xG...",
+  realistic content in a football-analytics corpus) untouched instead of
+  corrupting it into "85 xG...". Raises `GenerationError` if the LLM
   returns nothing usable, same failure-must-be-loud principle as
   `rewrite_query()`.
   **Observed live, documented honestly rather than only showing the good

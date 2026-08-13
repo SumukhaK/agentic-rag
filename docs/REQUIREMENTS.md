@@ -472,11 +472,8 @@ the reader has no way to detect on their own.
   to see, or content indicating a successful injection).
 - **Foul language refusal**: the system refuses to engage with foul/abusive
   language at any stage of the conversation.
-- **Resolved**: the injection judge and output-validation checks are
-  performed by the **local generation model (`mistral`)**, not Claude — no
-  new `ANTHROPIC_API_KEY` needed, consistent with the local-first stack and
-  with deferring Claude-as-evaluator (Phase 5) for the same credential gap.
-  See §13's decision log.
+- Which model performs the injection judge and output-validation checks (the
+  local generation model vs. Claude) is an open item — see §14.
 
 ## 13. Resolved Design Decisions
 
@@ -493,10 +490,12 @@ Log of decisions made explicitly during planning, for traceability:
 | Access-tier tagging mechanism | Folder-per-tier under the watched root | No extra file format to maintain; matches the watched-folder source of truth |
 | Semantic cache backend | In-memory, linear cosine similarity | No new infrastructure; mirrors `EmbeddingCache`'s established pattern for a much smaller, more ephemeral dataset than the document corpus |
 | Semantic cache scoping | Per `(query meaning, user_tier)`, not just query meaning | Follows directly from FR3 — a cached answer was generated from tier-filtered retrieval, so a different tier must never receive it |
-| Injection judge / output validation model | Local generation model (`mistral`) | No new `ANTHROPIC_API_KEY` needed; consistent with the local-first stack and with deferring Claude-as-evaluator (Phase 5) for the same credential gap |
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 
+- **Injection judge / output validation model**: local model (fast, no
+  external cost) vs. Claude (likely higher judgment quality, adds latency +
+  external API dependency). Needs a decision before Phase 6.
 - **Real access-tier names**: the linear tier list is a placeholder (§11)
   until the actual organizational roles are provided.
 - **Claude-as-evaluator scope and credentials**: no `ANTHROPIC_API_KEY` is

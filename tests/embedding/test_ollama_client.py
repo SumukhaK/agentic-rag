@@ -143,7 +143,10 @@ def test_embed_text_returns_a_single_embedding_vector(mock_post):
     mock_post.return_value = _mock_response(body={"embeddings": [[0.1, 0.2, 0.3]]})
 
     result = embed_text(
-        "Arsenal drew 1-1.", model="nomic-embed-text", base_url="http://localhost:11434", timeout=30
+        "Arsenal drew 1-1.",
+        model="nomic-embed-text",
+        base_url="http://localhost:11434",
+        timeout=30,
     )
 
     assert result == [0.1, 0.2, 0.3]

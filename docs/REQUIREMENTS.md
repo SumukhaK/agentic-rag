@@ -257,21 +257,31 @@ These rules apply to every answer the system produces, with no exceptions:
 
 **Implemented as** `generate_answer()` (`src/agentic_rag/orchestration/answer.py`).
 All three rules are encoded directly in the generation prompt: sources are
-listed with a citation number plus their path and access tier (rule 1), the
-model is instructed to reply with the canonical fallback verbatim if the
-sources don't suffice (rule 2), and told not to use knowledge beyond what's
-given (rule 3). When Phase 4's `plan_and_retrieve` already reports
-`sufficient=False`, `generate_answer` returns `planning_result.message`
-directly with no LLM call at all — the fastest and most certain way to
-satisfy rule 2 for that case. **Verified live that rule 2 is a genuine
-second line of defense, not just a formality**: `plan_and_retrieve`'s
-`sufficient` signal is a coarse, retrieval-only heuristic (§10) that came
-back `True` for "What is the capital of France?" against a football-only
-corpus, since retrieval always returns its nearest candidate even when
-nothing is actually relevant. `generate_answer()` caught it anyway —
-`mistral`, given the actual (irrelevant) chunk, correctly recognized it
-didn't answer the question and returned the canonical fallback instead of
-fabricating an answer.
+listed with a citation number plus their path, chunk index, and access tier
+(rule 1), the model is instructed to reply with the canonical fallback
+verbatim if the sources don't suffice (rule 2), and told not to use
+knowledge beyond what's given (rule 3). When Phase 4's `plan_and_retrieve`
+already reports `sufficient=False`, `generate_answer` returns
+`planning_result.message` directly with no LLM call at all — the fastest
+and most certain way to satisfy rule 2 for that case. **Verified live that
+rule 2 is a genuine second line of defense, not just a formality**:
+`plan_and_retrieve`'s `sufficient` signal is a coarse, retrieval-only
+heuristic (§10) that came back `True` for "What is the capital of France?"
+against a football-only corpus, since retrieval always returns its nearest
+candidate even when nothing is actually relevant. `generate_answer()`
+caught it anyway — `mistral`, given the actual (irrelevant) chunk,
+correctly recognized it didn't answer the question and returned the
+canonical fallback instead of fabricating an answer.
+
+Rule 1 is also **validated, not just requested**: prompt-following is
+probabilistic, which can't satisfy a rule with "no exceptions" on its own —
+a self-review finding on PR #25 made this explicit. `_is_grounded()` checks
+every generated answer before it's returned: valid only if it's the
+canonical fallback verbatim, or cites at least one source number actually
+in range (`1..len(candidates)`). An answer with no citations, or one citing
+a source that doesn't exist, is replaced with `CANNOT_ANSWER_MESSAGE` — a
+fabricated citation is worse than none, since it carries false authority
+the reader has no way to detect on their own.
 
 ## 9. Functional Requirements
 

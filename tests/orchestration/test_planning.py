@@ -6,6 +6,7 @@ from agentic_rag.embedding.ollama_client import EmbeddingError
 from agentic_rag.generation.llm_client import GenerationError
 from agentic_rag.orchestration.planning import (
     CANNOT_ANSWER_MESSAGE,
+    PlanningResult,
     plan_and_retrieve,
 )
 from agentic_rag.retrieval.access import UnknownAccessTierError
@@ -215,3 +216,18 @@ def test_plan_and_retrieve_does_not_retry_an_unknown_access_tier(
         plan_and_retrieve(**KWARGS)
 
     assert mock_decompose.call_count == 1
+
+
+def test_planning_result_rejects_insufficient_without_a_message():
+    # message must always be a real fallback string when sufficient=False -
+    # a caller (e.g. generate_answer) trusts this to return str, not
+    # Optional[str]; nothing but this invariant guarantees that.
+    with pytest.raises(ValueError):
+        PlanningResult(sufficient=False, outcomes=[], attempts_used=1, message=None)
+
+
+def test_planning_result_rejects_sufficient_with_a_message():
+    with pytest.raises(ValueError):
+        PlanningResult(
+            sufficient=True, outcomes=[], attempts_used=1, message=CANNOT_ANSWER_MESSAGE
+        )

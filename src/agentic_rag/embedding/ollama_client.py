@@ -8,7 +8,7 @@ class EmbeddingError(Exception):
 
 
 def embed_texts(
-    texts: list[str], model: str, base_url: str, timeout: int = 30
+    texts: list[str], model: str, base_url: str, timeout: int
 ) -> list[list[float]]:
     """Embed one or more texts in a single call via Ollama's /api/embed
     endpoint, returning one vector per input text, in order."""
@@ -31,6 +31,6 @@ def embed_texts(
         raise EmbeddingError(f"failed to reach Ollama: {exc}") from exc
 
 
-def embed_text(text: str, model: str, base_url: str, timeout: int = 30) -> list[float]:
+def embed_text(text: str, model: str, base_url: str, timeout: int) -> list[float]:
     """Embed a single text. A thin convenience wrapper over embed_texts()."""
     return embed_texts([text], model, base_url, timeout)[0]

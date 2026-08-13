@@ -335,12 +335,58 @@ building unwired infrastructure to fill the slot.
 
 ## Phase 6 — Access Control & Security
 
+**Judge model decided**: the prompt-injection judge and output/citation
+security validation (both blocked on the same §14 open item) will use the
+**local generation model (`mistral`)**, not Claude — no new
+`ANTHROPIC_API_KEY` needed, consistent with the local-first stack and with
+deferring Claude-as-evaluator in Phase 5 for the same credential gap.
+
+- [x] Secrets/config hygiene audit — checked against `.claude/CLAUDE.md` §5
+      ("Secrets never enter the repository... all configuration lives in
+      exactly one place"):
+      - `.env` is gitignored (`.gitignore`) and was **never** committed —
+        verified via `git log --all --full-history -- .env` (empty) and a
+        full-history filename scan, not just the current tree
+      - `.env.example` is committed and complete (every `Settings` field
+        has a documented placeholder/default), contains no real secrets
+      - Full-repo and full-git-history scan (all commits, all branches)
+        for common secret patterns (API key/token/password assignments,
+        private key headers, AWS/GitHub/OpenAI-style key prefixes) —
+        clean, nothing found
+      - No `os.environ`/`os.getenv` usage anywhere outside `config.py` —
+        every setting is sourced through `Settings`, no scattered env
+        reads
+      - No hardcoded model names, URLs, or config-mirroring numeric
+        literals found outside `config.py` in `src/`
+      - **One real finding, fixed**: `embed_texts()`/`embed_text()`
+        (`src/agentic_rag/embedding/ollama_client.py`) had a
+        `timeout: int = 30` default — a magic number baked into a
+        function signature instead of always being sourced from
+        `Settings.embedding_timeout_seconds`, contradicting this
+        project's established "no defaults on config-mirroring
+        parameters" convention. Confirmed via `git grep` that every real
+        call site already passed `timeout` explicitly, so the default
+        was dead weight, not a load-bearing convenience. Removed;
+        updated the 8 test call sites that had relied on it
+      - `ensure_collection()`'s `distance: Distance = Distance.COSINE`
+        default was reviewed and **kept** — this is an algorithmic
+        choice tightly coupled to `nomic-embed-text`'s own training
+        objective (changing it would require re-embedding the whole
+        corpus), not an environment-varying tunable like a model name or
+        timeout, so it doesn't fall under §5's "likely to change between
+        environments" rule the way the timeout default did
+      - **Flagged, not fixed** (out of scope for a config-hygiene pass):
+        `embed_text()` has zero production callers anywhere in `src/` —
+        spawned as a separate task to decide whether it's dead code to
+        remove or a placeholder for an anticipated Phase 7 caller
 - [ ] Configurable linear access-tier model (§11) wired end-to-end
-- [ ] Prompt-injection LLM judge — **blocked on model choice**, see
-      `docs/REQUIREMENTS.md` §14
-- [ ] Output/citation validation before returning an answer
+- [ ] Prompt-injection LLM judge (local `mistral`)
+- [ ] Output/citation security validation (local `mistral`) — distinct
+      from Phase 5's `_is_grounded()` (which only checks citation numbers
+      are in-range); this checks citations don't point outside the user's
+      access tier and chunk content doesn't show signs of a successful
+      injection (§12)
 - [ ] Foul-language refusal
-- [ ] Secrets/config hygiene audit
 
 ## Phase 7 — API & Delivery
 

@@ -282,9 +282,19 @@ These rules apply to every answer the system produces, with no exceptions:
 - **History rewriting**: on every new user query, the orchestrator rewrites
   the conversation history plus the new query into one self-contained query
   before it enters the retrieval pipeline (§6, step 2). This is what makes
-  FR2 (multi-turn context) work.
+  FR2 (multi-turn context) work. **Implemented as** `rewrite_query()`
+  (`src/agentic_rag/orchestration/rewrite.py`) — given a list of prior
+  `(user_query, assistant_answer)` turns and the new query, prompts
+  `generate()` to produce a single standalone question with pronouns/
+  references resolved. Returns the query unchanged, with **no LLM call**,
+  when there's no history yet — the first turn is already self-contained,
+  and calling the LLM would be pure wasted latency. Verified live: "Who
+  scored for them?" after a turn about an Arsenal-Chelsea match correctly
+  rewrote to "Which players scored for Arsenal in their match against
+  Chelsea?" — "them" and "it" both resolved from context.
 - **Sub-question decomposition**: a complex question may be split into
   sub-questions, each run through the retrieval pipeline independently.
+  *(Not yet implemented — next.)*
 - **Retry/replanning loop**: if the evidence retrieved for a (sub-)question is
   insufficient to answer it, the system returns to planning and retries —
   up to **5 turns** total.

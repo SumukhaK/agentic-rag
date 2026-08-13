@@ -26,12 +26,13 @@ def _require_sparse_model():
 
 @pytest.fixture(autouse=True)
 def _mock_dense_embeddings():
-    # index_document() (upsert.py) and hybrid_search() (search.py) each
-    # import their own reference to embed_texts, so both need mocking -
-    # patching only one leaves the other hitting the real (768-dim) Ollama
-    # server against a test collection sized for the mocked (3-dim) vector.
+    # index_document() (upsert.py) calls embed_texts directly for its own
+    # batch-of-chunks use case; hybrid_search() (search.py) goes through
+    # embed_query_dense() (embedding/cache.py) for its single-query case -
+    # both need mocking, or one hits the real (768-dim) Ollama server
+    # against a test collection sized for the mocked (3-dim) vector.
     with patch("agentic_rag.indexing.upsert.embed_texts") as mock_upsert, patch(
-        "agentic_rag.retrieval.search.embed_texts"
+        "agentic_rag.embedding.cache.embed_texts"
     ) as mock_search:
         mock_upsert.return_value = [[0.1, 0.2, 0.3]]
         mock_search.return_value = [[0.1, 0.2, 0.3]]

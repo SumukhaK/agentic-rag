@@ -290,11 +290,48 @@ building unwired infrastructure to fill the slot.
       in 2.2s (cache hit); the same rephrasing at a different tier
       correctly missed the cache and re-ran the full pipeline (16.9s),
       confirming tier isolation holds in practice, not just in tests.
-      **Known, deliberately deferred** (same precedent as `EmbeddingCache`):
-      no persistence across restarts, no eviction/TTL — a stale cached
-      answer can outlive the document that would have invalidated it
-      (FR4's near-real-time freshness applies to retrieval, not to
-      whatever the cache decided to skip retrieval for)
+- [x] Self-review hardening (PR #26): 8 finder angles surfaced a
+      genuinely serious gap — three independently converged on it.
+      Caching `CANNOT_ANSWER_MESSAGE` created a **negative cache that
+      never self-corrects**: if a document answering a question is
+      ingested moments after that question was asked (well within FR4's
+      near-real-time freshness target), every semantically-similar repeat
+      kept getting served the stale fallback instead of reaching the
+      now-correct pipeline. Sharper still: because this system's access
+      model is folder-per-tier (§11), moving a document to a stricter
+      tier is a normal, supported reclassification — a cached answer has
+      no hook to detect that and could keep serving content a user is no
+      longer authorized to see. Fixed with two layers: (1)
+      `answer_with_cache` never caches when `planning_result.sufficient`
+      is `False`, **and** never caches when the generated answer's text
+      contains the fallback phrase even if `sufficient` was `True` —
+      live-tested and confirmed necessary: `plan_and_retrieve`'s coarse
+      signal can still misfire on a tiny corpus, and the model hedged
+      with an answer that opened with the fallback phrase but tacked on
+      a technically-in-range citation that passed `_is_grounded()`;
+      checking `sufficient` alone would have cached it anyway; (2) a
+      configurable TTL (`Settings.semantic_cache_ttl_seconds`, default
+      300s) bounds — doesn't eliminate — how long *any* cached answer,
+      including a correctly-cached grounded one, can outlive the document
+      it cites. Also fixed: `_CacheEntry` now scoped by `embedding_model`
+      too (a cross-model dimension mismatch previously crashed `get()`
+      instead of degrading to a miss); `_entries` restructured from a
+      flat list to `dict[tier, list]` (a lookup no longer scans other
+      tiers' entries first); cosine similarity clamped to `[-1, 1]`
+      (floating point drift could otherwise reject an exact self-match
+      at a threshold of exactly 1.0); extracted `embed_query_dense()`
+      (`src/agentic_rag/embedding/cache.py`) to remove duplicated
+      embed-with-cache wiring between `hybrid_search` and this module;
+      merged `test_answer_with_cache.py` into `test_semantic_cache.py`
+      per this repo's own test-file-mirrors-source-file convention, which
+      the first version broke. **Known, deliberately deferred** (same
+      precedent as `EmbeddingCache`): no persistence across restarts, no
+      re-validation of a cached answer's grounding at read time (only
+      checked once, at write time), and `answer_with_cache` still returns
+      only a bare `str` — a caller has no way to resolve `[1]`/`[2]`
+      citations back to source metadata, on a hit or a miss. Solving that
+      properly means deciding the API response shape, which belongs to
+      Phase 7, not guessed at here.
 
 ## Phase 6 — Access Control & Security
 

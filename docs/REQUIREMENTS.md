@@ -251,11 +251,28 @@ Two caching layers, both required, to meet the speed/reliability target:
   rephrasing at the same tier returned the identical answer in 2.2s (cache
   hit); the same rephrasing at a different tier correctly missed the cache
   and re-ran the full pipeline (16.9s) — tier isolation confirmed in
-  practice, not just in mocked tests. Eviction policy and persistence
-  remain open — same caveat as `EmbeddingCache` (§7 above); a stale cached
-  answer can outlive the document that would have invalidated it, since
-  FR4's near-real-time freshness applies to retrieval, not to whatever the
-  cache decided to skip retrieval for.
+  practice, not just in mocked tests.
+
+  **Self-review (PR #26) caught a genuinely serious gap, confirmed by
+  three independent finder angles**: caching `CANNOT_ANSWER_MESSAGE`
+  creates a negative cache that never self-corrects, even after a
+  not-yet-ingested document arrives within FR4's own freshness target —
+  and because this system's access-tier model is folder-per-tier (§11), a
+  document can be *reclassified* to a stricter tier just by moving it,
+  which a cache with no invalidation hook can't detect, risking a cached
+  answer citing content the user is no longer authorized to see. Fixed
+  with two layers, not one: `answer_with_cache` never caches when
+  `sufficient=False`, **and** never caches when the answer text itself
+  contains the fallback phrase even when `sufficient=True` — necessary in
+  practice, not just in theory, since a live test showed the coarse
+  `sufficient` signal can still misfire while the model hedges with an
+  answer that opens with the fallback phrase but adds a citation that
+  passes `_is_grounded()` anyway. A configurable TTL
+  (`Settings.semantic_cache_ttl_seconds`, default 300s) is the second
+  layer: it bounds, but does not eliminate, how long even a correctly
+  cached grounded answer can outlive the document it cites. Full
+  invalidation (a hook into ingestion events, or re-validating grounding
+  at read time) remains open, same caveat as `EmbeddingCache` (§7 above).
 
 ## 8. Grounding & Answer Rules
 

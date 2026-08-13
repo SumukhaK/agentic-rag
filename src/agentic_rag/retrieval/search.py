@@ -11,8 +11,7 @@ from qdrant_client.models import (
     Prefetch,
 )
 
-from agentic_rag.embedding.cache import EmbeddingCache, embed_with_cache
-from agentic_rag.embedding.ollama_client import embed_texts
+from agentic_rag.embedding.cache import EmbeddingCache, embed_query_dense, embed_with_cache
 from agentic_rag.embedding.sparse_client import embed_sparse_texts
 from agentic_rag.indexing.qdrant_setup import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
 from agentic_rag.retrieval.access import allowed_tiers_for
@@ -67,17 +66,13 @@ def hybrid_search(
     )
 
     def embed_dense() -> list[float]:
-        return embed_with_cache(
-            [query],
+        return embed_query_dense(
+            query,
             model=embedding_model,
+            base_url=ollama_base_url,
+            timeout=embedding_timeout_seconds,
             cache=embedding_cache,
-            embed_fn=lambda batch: embed_texts(
-                batch,
-                model=embedding_model,
-                base_url=ollama_base_url,
-                timeout=embedding_timeout_seconds,
-            ),
-        )[0]
+        )
 
     def embed_sparse():
         return embed_with_cache(

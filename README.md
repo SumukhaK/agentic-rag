@@ -170,17 +170,26 @@ Shipped (`src/agentic_rag/orchestration/answer.py`):
   retrieved chunk didn't actually answer the question
 - `SemanticCache` + `answer_with_cache()`
   (`src/agentic_rag/orchestration/semantic_cache.py`) — an in-memory,
-  linear-cosine-similarity cache from (query meaning, access tier) to a
-  previously generated answer. Scoped per `user_tier`, not just query
-  meaning, since a cached answer was generated from retrieval already
-  filtered to the tier that produced it (FR3) — two users at different
-  tiers must never share a cache entry. Live-verified: a repeat,
+  linear-cosine-similarity cache from (query meaning, access tier,
+  embedding model) to a previously generated answer. Scoped per
+  `user_tier`, not just query meaning, since a cached answer was generated
+  from retrieval already filtered to the tier that produced it (FR3) — two
+  users at different tiers must never share a cache entry. Never caches the
+  canonical "I do not know" fallback — self-review found and live-confirmed
+  that caching it creates a negative cache that never self-corrects even
+  after the relevant document is ingested. A configurable TTL
+  (`Settings.semantic_cache_ttl_seconds`, default 300s) bounds how long any
+  cached answer, including a correctly-cached one, can outlive the document
+  it cites — this system's folder-per-tier access model means a document
+  can be reclassified to a stricter tier just by moving it, which the
+  cache has no hook to detect on its own. Live-verified: a repeat,
   semantically-similar query at the same tier dropped from 50.8s to 2.2s
   (cache hit); the identical rephrasing at a different tier correctly
-  missed the cache and re-ran the full pipeline, confirming tier isolation
-  holds in practice. Claude-as-evaluator wiring is deliberately deferred —
-  no Anthropic API key is configured for this project, and its detailed
-  spec belongs to Phase 8
+  missed the cache and re-ran the full pipeline; an out-of-corpus query
+  correctly re-ran the full pipeline on every repeat rather than being
+  cached. Claude-as-evaluator wiring is deliberately deferred — no
+  Anthropic API key is configured for this project, and its detailed spec
+  belongs to Phase 8
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

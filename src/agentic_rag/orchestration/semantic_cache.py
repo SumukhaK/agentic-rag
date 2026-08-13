@@ -1,19 +1,20 @@
 import math
+import time
 from dataclasses import dataclass
 
 from qdrant_client import QdrantClient
 
-from agentic_rag.embedding.cache import EmbeddingCache, embed_with_cache
-from agentic_rag.embedding.ollama_client import embed_texts
+from agentic_rag.embedding.cache import EmbeddingCache, embed_query_dense
 from agentic_rag.orchestration.answer import generate_answer
-from agentic_rag.orchestration.planning import plan_and_retrieve
+from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE, plan_and_retrieve
 
 
 @dataclass(frozen=True)
 class _CacheEntry:
     query_embedding: list[float]
-    user_tier: str
+    embedding_model: str
     answer: str
+    cached_at: float
 
 
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -24,39 +25,70 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     norm_b = math.sqrt(sum(y * y for y in b))
     if norm_a == 0 or norm_b == 0:
         return 0.0
-    return dot / (norm_a * norm_b)
+    # Clamp against floating point drift from independently-summed
+    # reductions - a vector compared against itself can otherwise compute
+    # to e.g. 1.0000000000000002, which would incorrectly fail a
+    # similarity_threshold of exactly 1.0.
+    return max(-1.0, min(1.0, dot / (norm_a * norm_b)))
 
 
 class SemanticCache:
-    """In-memory cache from (query meaning, user_tier) to a previously
-    generated final answer, so a semantically-similar repeat question can
-    skip the full retrieval+generation pipeline.
+    """In-memory cache from (query meaning, user_tier, embedding_model) to a
+    previously generated final answer, so a semantically-similar repeat
+    question can skip the full retrieval+generation pipeline.
 
-    Scoped per `user_tier`, not just per query: a cached answer was
+    Scoped per `user_tier`, not just query meaning: a cached answer was
     generated from retrieval already filtered to the tier that produced it
     (REQUIREMENTS.md §11/FR3), so serving it to a different tier could leak
     content that tier isn't entitled to, or under-serve one that is - two
     users at different tiers asking near-identical questions must never
-    share a cache entry.
+    share a cache entry. Entries are stored per-tier (not a single flat
+    list filtered inline) so a lookup only ever scans its own tier's
+    entries, not every other tier's too.
 
-    Same lifetime caveats as `EmbeddingCache` (embedding/cache.py), and for
-    the same reason - flagged here rather than silently assumed away:
-    in-memory only, no persistence across restarts, and unbounded (no
-    eviction, no TTL), so a stale answer can outlive the document that
-    invalidated it (FR4's near-real-time freshness applies to retrieval,
-    not to whatever a cache decided to skip retrieval for).
+    Also scoped per `embedding_model`: entries from a different model can
+    have different dimensionality (or simply not be comparable), so an
+    entry from a different model is skipped rather than ever being allowed
+    to crash or corrupt a lookup for the model actually in use.
+
+    Entries expire after `ttl_seconds` (checked at read time via `get`,
+    not proactively swept) - this bounds, but does not eliminate, two real
+    staleness risks flagged during self-review rather than solved outright:
+    the corpus can change (FR4's near-real-time freshness) after an answer
+    is cached, and - since this system's access-tier model is folder-per-
+    tier (REQUIREMENTS.md §11) - a document can be *reclassified* to a
+    stricter tier by simply moving it, which the cache has no hook to
+    detect. An unbounded TTL would let a cached answer keep citing deleted
+    or since-restricted content indefinitely; a bounded one caps the
+    exposure window instead. `answer_with_cache` also never caches the
+    canonical "I do not know" fallback (see its own docstring) so a
+    not-yet-ingested document can't be permanently masked by a cached
+    negative result.
+
+    Same "no persistence across restarts" caveat as `EmbeddingCache`
+    (embedding/cache.py), for the same reason - not solved here.
     """
 
     def __init__(self) -> None:
-        self._entries: list[_CacheEntry] = []
+        self._entries: dict[str, list[_CacheEntry]] = {}
 
     def get(
-        self, query_embedding: list[float], user_tier: str, *, similarity_threshold: float
+        self,
+        query_embedding: list[float],
+        user_tier: str,
+        embedding_model: str,
+        *,
+        similarity_threshold: float,
+        ttl_seconds: float,
+        now: float | None = None,
     ) -> str | None:
+        current_time = time.time() if now is None else now
         best_similarity = -1.0
         best_answer: str | None = None
-        for entry in self._entries:
-            if entry.user_tier != user_tier:
+        for entry in self._entries.get(user_tier, []):
+            if entry.embedding_model != embedding_model:
+                continue
+            if current_time - entry.cached_at > ttl_seconds:
                 continue
             similarity = _cosine_similarity(query_embedding, entry.query_embedding)
             if similarity > best_similarity:
@@ -66,12 +98,23 @@ class SemanticCache:
             return best_answer
         return None
 
-    def put(self, query_embedding: list[float], user_tier: str, answer: str) -> None:
-        self._entries.append(
-            _CacheEntry(
-                query_embedding=list(query_embedding), user_tier=user_tier, answer=answer
-            )
+    def put(
+        self,
+        query_embedding: list[float],
+        user_tier: str,
+        embedding_model: str,
+        answer: str,
+        *,
+        now: float | None = None,
+    ) -> None:
+        current_time = time.time() if now is None else now
+        entry = _CacheEntry(
+            query_embedding=list(query_embedding),
+            embedding_model=embedding_model,
+            answer=answer,
+            cached_at=current_time,
         )
+        self._entries.setdefault(user_tier, []).append(entry)
 
 
 def answer_with_cache(
@@ -94,6 +137,7 @@ def answer_with_cache(
     rerank_top_k: int,
     max_attempts: int,
     similarity_threshold: float,
+    ttl_seconds: float,
 ) -> str:
     """Answer `query` for `user_tier`, serving a cached answer for a
     semantically-similar past query at the same tier instead of re-running
@@ -106,22 +150,49 @@ def answer_with_cache(
     already been resolved into an actual, comparable question.
 
     The embedding used for the cache lookup is `query`'s own dense
-    embedding, distinct from (and computed separately from) the embeddings
-    `plan_and_retrieve` computes for its decomposed sub-questions - caching
-    compares whole-question meaning, decomposition compares per-sub-question
-    meaning, and there's no way to derive one from the other without first
-    calling `decompose_query` itself.
-    """
-    query_embedding = embed_with_cache(
-        [query],
-        model=embedding_model,
-        cache=embedding_cache,
-        embed_fn=lambda batch: embed_texts(
-            batch, model=embedding_model, base_url=ollama_base_url, timeout=embedding_timeout_seconds
-        ),
-    )[0]
+    embedding - distinct from what `plan_and_retrieve` computes for its
+    decomposed sub-questions, since caching compares whole-question
+    meaning and decomposition compares per-sub-question meaning. In the
+    common case where the query is already simple (`decompose_query`
+    returns it unchanged as the only sub-question), both end up embedding
+    the same string, and the shared `embedding_cache` makes the second
+    embedding a cache hit rather than a second Ollama round-trip - but
+    this depends on the two texts matching exactly, so it's an incidental
+    win when it happens, not something relied upon.
 
-    cached_answer = cache.get(query_embedding, user_tier, similarity_threshold=similarity_threshold)
+    A cache hit returns the stored answer as-is, without re-running
+    `_is_grounded()` (answer.py) against it - that validation only ran
+    once, at write time, against the evidence available then. This is a
+    known, deliberately unresolved gap alongside the TTL/staleness caveats
+    on `SemanticCache` itself, not something this function papers over.
+
+    Only cached when `planning_result.sufficient` AND the generated answer
+    itself doesn't contain the canonical fallback phrase (see
+    `SemanticCache`'s docstring for why a fallback specifically must not
+    be cached). Checking `sufficient` alone isn't enough: it's a coarse,
+    retrieval-only signal (planning.py) that can still be `True` for a
+    genuinely unanswerable question, and a model can hedge with an answer
+    that opens with the fallback phrase but tacks on a citation that
+    happens to pass `_is_grounded()`'s in-range check - live-observed, not
+    hypothetical. The answer's own content is the more direct signal for
+    "this is actually a non-answer" than the signal that led to generating
+    it in the first place.
+    """
+    query_embedding = embed_query_dense(
+        query,
+        model=embedding_model,
+        base_url=ollama_base_url,
+        timeout=embedding_timeout_seconds,
+        cache=embedding_cache,
+    )
+
+    cached_answer = cache.get(
+        query_embedding,
+        user_tier,
+        embedding_model,
+        similarity_threshold=similarity_threshold,
+        ttl_seconds=ttl_seconds,
+    )
     if cached_answer is not None:
         return cached_answer
 
@@ -151,5 +222,7 @@ def answer_with_cache(
         timeout=generation_timeout_seconds,
     )
 
-    cache.put(query_embedding, user_tier, answer)
+    if planning_result.sufficient and CANNOT_ANSWER_MESSAGE not in answer:
+        cache.put(query_embedding, user_tier, embedding_model, answer)
+
     return answer

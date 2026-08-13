@@ -1,6 +1,8 @@
+from unittest.mock import patch
+
 import pytest
 
-from agentic_rag.embedding.cache import EmbeddingCache, embed_with_cache
+from agentic_rag.embedding.cache import EmbeddingCache, embed_query_dense, embed_with_cache
 
 
 def test_embed_with_cache_calls_embed_fn_only_for_uncached_texts():
@@ -91,3 +93,26 @@ def test_embed_with_cache_does_not_cache_partial_results_on_mismatch():
     assert cache.get("m", "one") is None
     assert cache.get("m", "two") is None
     assert call_count == 1
+
+
+@patch("agentic_rag.embedding.cache.embed_texts")
+def test_embed_query_dense_returns_the_embedding(mock_embed_texts):
+    mock_embed_texts.return_value = [[1.0, 2.0, 3.0]]
+    cache = EmbeddingCache()
+
+    result = embed_query_dense(
+        "who won?", model="m", base_url="http://localhost:11434", timeout=30, cache=cache
+    )
+
+    assert result == [1.0, 2.0, 3.0]
+
+
+@patch("agentic_rag.embedding.cache.embed_texts")
+def test_embed_query_dense_reuses_the_shared_cache(mock_embed_texts):
+    mock_embed_texts.return_value = [[1.0, 2.0, 3.0]]
+    cache = EmbeddingCache()
+
+    embed_query_dense("who won?", model="m", base_url="http://localhost:11434", timeout=30, cache=cache)
+    embed_query_dense("who won?", model="m", base_url="http://localhost:11434", timeout=30, cache=cache)
+
+    assert mock_embed_texts.call_count == 1

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from agentic_rag.generation.llm_client import generate
+from agentic_rag.generation.llm_client import GenerationError, generate
 
 _REWRITE_PROMPT_TEMPLATE = """Given the conversation history below, rewrite the user's latest question into a single, self-contained question that can be understood without the history. Resolve any pronouns or references to earlier turns. Do not answer the question - only rewrite it. Reply with ONLY the rewritten question, nothing else.
 
@@ -43,8 +43,9 @@ def rewrite_query(
     self-contained by definition, and calling the LLM would be pure
     wasted latency.
 
-    Raises GenerationError (propagated from generate()) if the LLM call
-    fails - a failed rewrite must not silently fall back to the raw query
+    Raises GenerationError if the LLM call fails, or if it returns an
+    empty/whitespace-only "rewrite" - either way, a failed rewrite must
+    not silently fall back to the raw query (or to an unusable empty one)
     without the caller knowing.
     """
     if not history:
@@ -53,5 +54,9 @@ def rewrite_query(
     prompt = _REWRITE_PROMPT_TEMPLATE.format(
         history=_format_history(history), query=query
     )
-    rewritten = generate(prompt, model=model, base_url=base_url, timeout=timeout)
-    return rewritten.strip()
+    rewritten = generate(prompt, model=model, base_url=base_url, timeout=timeout).strip()
+
+    if not rewritten:
+        raise GenerationError("the LLM returned an empty rewritten query")
+
+    return rewritten

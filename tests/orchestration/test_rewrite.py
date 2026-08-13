@@ -51,3 +51,15 @@ def test_rewrite_query_propagates_generation_error(mock_generate):
 
     with pytest.raises(GenerationError):
         rewrite_query(history, "Who won it?", **KWARGS)
+
+
+@patch("agentic_rag.orchestration.rewrite.generate")
+def test_rewrite_query_raises_when_the_llm_returns_an_empty_rewrite(mock_generate):
+    # An empty/whitespace-only "rewrite" is a worse failure than an
+    # exception: nothing would signal it, and it would silently reach
+    # retrieval as a query with nothing to search for.
+    mock_generate.return_value = "   \n  "
+    history = [ConversationTurn(user_query="q", assistant_answer="a")]
+
+    with pytest.raises(GenerationError):
+        rewrite_query(history, "Who won it?", **KWARGS)

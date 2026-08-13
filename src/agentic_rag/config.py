@@ -21,3 +21,5 @@ class Settings(BaseSettings):
     retrieval_top_k_candidates: int = 10
     reranker_model: str = "BAAI/bge-reranker-base"
     rerank_top_k: int = 4
+    generation_model: str = "mistral"
+    generation_timeout_seconds: int = 60

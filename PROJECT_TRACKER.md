@@ -134,7 +134,14 @@ building unwired infrastructure to fill the slot.
 
 ## Phase 4 — Orchestration & Multi-Turn Chat
 
-- [ ] Orchestrator: history + query rewriting on every turn
+- [x] `mistral` pulled and verified working via Ollama — needed now, not
+      just for Phase 5, since rewriting/decomposition are LLM reasoning
+      tasks. `generate()` (`src/agentic_rag/generation/llm_client.py`)
+      wraps Ollama's `/api/generate` endpoint; shared building block that
+      Phase 5's final answer generation will reuse with a different
+      prompt. See `docs/REQUIREMENTS.md` §10 for why `mistral` over
+      Mixtral (~4.1GB vs. ~26GB)
+- [ ] Orchestrator: history + query rewriting on every turn (next)
 - [ ] Sub-question decomposition
 - [ ] Retry/replanning loop (up to 5 turns) on insufficient evidence
 - [ ] Canonical "I do not know" fallback wired to both direct no-match and
@@ -143,7 +150,7 @@ building unwired infrastructure to fill the slot.
 ## Phase 5 — Generation & Grounding
 
 - [ ] Prompt assembly: top-4 chunks + grounding rules + query
-- [ ] Generation via Mistral/Mixtral (Ollama)
+- [ ] Generation via `mistral` (Ollama) — reuses `generate()` from Phase 4
 - [ ] Citation enforcement (source + access level on every factual claim)
 - [ ] No-outside-knowledge enforcement
 - [ ] Claude-as-evaluator wiring (offline eval, not in the live answer path)

@@ -12,7 +12,9 @@ status: [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) · Working agreement:
 
 - **Language:** Python
 - **Vector store:** Qdrant (HNSW, native hybrid dense + sparse search)
-- **Generation model:** Mistral / Mixtral, served locally via Ollama
+- **Generation model:** `mistral`, served locally via Ollama (pulled
+  during Phase 4 — Mixtral was the other originally-considered option but
+  is ~26GB vs. mistral's ~4.1GB, not warranted for local dev)
 - **Embedding model:** `nomic-embed-text`, served locally via Ollama
 - **Reranker:** local open-source cross-encoder (`bge-reranker-v2-m3`-class)
 - **Evaluation:** Claude (Anthropic API) used as an evaluator/judge, not as the RAG generator
@@ -47,7 +49,7 @@ flowchart TD
     FUSE --> ACL{Access control\nfilter}
     ACL --> RERANK[Reranker\ncross-encoder -> top 4]
     RERANK --> PROMPT[Assemble prompt\nchunks + rules + query]
-    PROMPT --> LLM[Generation LLM\nMistral/Mixtral via Ollama]
+    PROMPT --> LLM[Generation LLM\nmistral via Ollama]
     LLM --> OUTCHK{Output & citation\nsafety check}
     OUTCHK -- fail --> IDK["I do not know the answer\nbased on indexed documents"]
     OUTCHK -- pass --> ANSWER[Answer\nwith citations + access level]

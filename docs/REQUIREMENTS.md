@@ -179,7 +179,9 @@ visual diagram; this is the authoritative step list:
    with the reranker's own relevance score.
 6. **Generation**: the top 4 chunks + the grounding rules (§8) + the
    (rewritten) user query are assembled into the final prompt and sent to the
-   generation LLM (Mistral/Mixtral via Ollama) to produce the answer.
+   generation LLM (`mistral` via Ollama — see §10 for why `mistral` rather
+   than the originally-named Mistral/Mixtral pairing) to produce the
+   answer. *(Not yet implemented — Phase 5.)*
 
 All retrieval (step 4 onward) is subject to the access-control filter in §11
 — a candidate the user isn't permitted to see must never reach step 5, let
@@ -265,6 +267,18 @@ These rules apply to every answer the system produces, with no exceptions:
 
 ## 10. Multi-Turn Chat & Query Decomposition
 
+- **Generation model: `mistral`, served locally via Ollama** (pulled and
+  verified working during Phase 4 — `nomic-embed-text`, the sparse
+  reranker/embedder, and `mistral` are all pulled now). Mixtral was the
+  other originally-named option but is far larger (~26GB vs. mistral's
+  ~4.1GB) and wasn't warranted for local dev.
+  **Implemented as** `generate()` (`src/agentic_rag/generation/llm_client.py`)
+  — a thin wrapper around Ollama's `/api/generate` endpoint, wrapping
+  connection/malformed-response failures in `GenerationError`. This is a
+  shared building block: orchestration (this section) uses it for query
+  rewriting and decomposition, and Phase 5 reuses the same client for
+  final answer generation with a different prompt — the client itself
+  doesn't change between the two uses, only the prompt does.
 - **History rewriting**: on every new user query, the orchestrator rewrites
   the conversation history plus the new query into one self-contained query
   before it enters the retrieval pipeline (§6, step 2). This is what makes

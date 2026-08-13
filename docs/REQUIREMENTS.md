@@ -465,7 +465,12 @@ the reader has no way to detect on their own.
 - **Access control** — covered by §11; the first line of defense.
 - **Prompt injection detection**: incoming user queries are screened by an
   LLM-based judge for injection attempts before being used in retrieval or
-  generation.
+  generation. **Implemented as** `check_for_injection()`
+  (`src/agentic_rag/orchestration/injection_judge.py`) — empirically
+  validated 15/15 against known injection attempts and benign football
+  queries (including harder edge cases), live against `mistral`; see
+  `PROJECT_TRACKER.md`'s Phase 6 log for the full validation set and
+  results.
 - **Output/citation validation**: before an answer is returned, its citation
   links and the underlying chunks are checked for security threats or
   malfunction (e.g. a citation pointing to a chunk the user isn't permitted

@@ -434,11 +434,32 @@ building unwired infrastructure to fill the slot.
       see `docs/REQUIREMENTS.md` §13 for the one-line summary (the full
       reasoning lives here, not duplicated there)
 - [ ] Configurable linear access-tier model (§11) wired end-to-end
-- [ ] Prompt-injection LLM judge (local `mistral`, per the decision above)
+- [x] Prompt-injection LLM judge (local `mistral`, per the decision above)
       — screens incoming user queries for injection attempts before
-      they're used in retrieval or generation (§12). Not done until
-      validated against a fixed set of known injection/benign prompts per
-      the decision above
+      they're used in retrieval or generation (§12). **Implemented as**
+      `check_for_injection()` (`src/agentic_rag/orchestration/injection_judge.py`)
+      — a single-word classification prompt (`INJECTION`/`CLEAN`), parsed
+      leniently (case-insensitive, tolerant of extra text) since `mistral`
+      doesn't reliably follow "reply with ONLY one word" to the letter.
+      **Fails closed**: a response that isn't unambiguously `CLEAN` —
+      empty, unparseable, or containing both keywords — is treated as an
+      injection, not silently waved through. Not wired into `answer_with_cache`
+      or any other caller yet, consistent with this codebase's established
+      pattern (`rewrite_query` isn't wired into `plan_and_retrieve` either)
+      — composition is a Phase 7 concern once the actual entrypoint decides
+      whether to screen the raw or rewritten query.
+      **Empirical validation (the Definition-of-Done this item committed
+      to)**: live-tested against real Ollama/`mistral`, not mocked. Round
+      1 — 5 injection attempts (instruction override, "developer mode",
+      "SYSTEM OVERRIDE", role-play jailbreak) and 5 benign football
+      queries: **10/10 correct**. Round 2 — 5 harder edge cases (an
+      injection attempt appended to a genuine football question, benign
+      questions using security-adjacent vocabulary like "system" and
+      "instructions" in a football sense, a multi-step instruction-override
+      attempt): **5/5 correct**. **15/15 overall** — a strong result, but
+      recorded honestly as a 15-prompt validation, not a comprehensive
+      security audit; Phase 8's evaluation is still the place to track
+      this at scale over time, now that Phase 6's own gate has been met
 - [ ] Output/citation security validation (local `mistral`) — distinct
       from Phase 5's `_is_grounded()` (which only checks citation numbers
       are in-range). Checks citations and underlying chunks for security

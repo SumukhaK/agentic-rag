@@ -335,12 +335,64 @@ building unwired infrastructure to fill the slot.
 
 ## Phase 6 — Access Control & Security
 
+- [x] Secrets/config hygiene audit — checked against `.claude/CLAUDE.md` §5
+      ("Secrets never enter the repository... all configuration lives in
+      exactly one place"):
+      - `.env` is gitignored (`.gitignore`) and was **never** committed —
+        verified via `git log --all --full-history -- .env` (empty) and a
+        full-history filename scan, not just the current tree
+      - `.env.example` is committed and complete (every `Settings` field
+        has a documented placeholder/default), contains no real secrets
+      - Full-repo and full-git-history scan (all commits, all branches)
+        for common secret patterns (API key/token/password assignments,
+        private key headers, AWS/GitHub/OpenAI-style key prefixes) —
+        clean, nothing found
+      - No `os.environ`/`os.getenv` usage anywhere outside `config.py` —
+        every setting is sourced through `Settings`, no scattered env
+        reads
+      - No hardcoded model names, URLs, or config-mirroring numeric
+        literals found outside `config.py` in `src/`
+      - **One real finding, fixed**: `embed_texts()`/`embed_text()`
+        (`src/agentic_rag/embedding/ollama_client.py`) had a
+        `timeout: int = 30` default — a magic number baked into a
+        function signature instead of always being sourced from
+        `Settings.embedding_timeout_seconds`, contradicting this
+        project's established "no defaults on config-mirroring
+        parameters" convention. Confirmed via `git grep` that every real
+        (non-test) call site already passed `timeout` explicitly, so the
+        default was dead weight, not a load-bearing convenience. Removed;
+        updated the 7 test call sites that had relied on the default (an
+        8th already passed `timeout=45` explicitly pre-existing and
+        needed no change)
+      - `ensure_collection()`'s `distance: Distance = Distance.COSINE`
+        default was reviewed twice. First pass: kept, reasoning it's an
+        algorithmic choice tied to `nomic-embed-text`'s own training
+        objective, not an environment-varying tunable like a model name
+        or timeout. Self-review caught that this conclusion stopped one
+        question short — it asked "is the default value correct" but
+        never "should this be a parameter at all." Confirmed via `git
+        grep` that **zero** call sites, real or test, ever pass a
+        non-default `distance`, and the codebase already treats cosine
+        as a fixed constant elsewhere (the semantic cache's own
+        `_cosine_similarity()` takes no distance-metric parameter at
+        all) — a defaulted-but-overridable parameter was less
+        consistent with that than removing it outright. Fixed:
+        `distance` is no longer a parameter; `Distance.COSINE` is
+        hardcoded in the one `create_collection` call site. This also
+        closes a real gap the parameter enabled: the idempotency check
+        only ever validated `vector_size` against an existing
+        collection, never `distance` — a caller that *had* passed a
+        mismatched distance would have been silently accepted instead
+        of raising `CollectionSchemaMismatchError`
+      - **Flagged, not fixed** (out of scope for a config-hygiene pass):
+        `embed_text()` has zero production callers anywhere in `src/` —
+        spawned as a separate task to decide whether it's dead code to
+        remove or a placeholder for an anticipated Phase 7 caller
 - [ ] Configurable linear access-tier model (§11) wired end-to-end
 - [ ] Prompt-injection LLM judge — **blocked on model choice**, see
       `docs/REQUIREMENTS.md` §14
 - [ ] Output/citation validation before returning an answer
 - [ ] Foul-language refusal
-- [ ] Secrets/config hygiene audit
 
 ## Phase 7 — API & Delivery
 

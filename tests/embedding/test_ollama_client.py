@@ -35,6 +35,7 @@ def test_embed_texts_returns_an_embedding_per_input(mock_post):
         ["Arsenal drew 1-1.", "Chelsea won 3-0."],
         model="nomic-embed-text",
         base_url="http://localhost:11434",
+        timeout=30,
     )
 
     assert result == [[0.1, 0.2], [0.3, 0.4]]
@@ -69,6 +70,7 @@ def test_embed_texts_raises_embedding_error_when_ollama_is_unreachable(mock_post
             ["Arsenal drew 1-1."],
             model="nomic-embed-text",
             base_url="http://localhost:11434",
+            timeout=30,
         )
 
 
@@ -81,6 +83,7 @@ def test_embed_texts_raises_embedding_error_on_a_non_200_response(mock_post):
             ["Arsenal drew 1-1."],
             model="nomic-embed-text",
             base_url="http://localhost:11434",
+            timeout=30,
         )
 
 
@@ -95,6 +98,7 @@ def test_embed_texts_raises_embedding_error_when_embeddings_key_is_missing(mock_
             ["Arsenal drew 1-1."],
             model="nomic-embed-text",
             base_url="http://localhost:11434",
+            timeout=30,
         )
 
 
@@ -109,6 +113,7 @@ def test_embed_texts_raises_embedding_error_on_a_non_json_body(mock_post):
             ["Arsenal drew 1-1."],
             model="nomic-embed-text",
             base_url="http://localhost:11434",
+            timeout=30,
         )
 
 
@@ -129,6 +134,7 @@ def test_embed_texts_reports_a_non_json_body_as_an_unexpected_response_not_unrea
             ["Arsenal drew 1-1."],
             model="nomic-embed-text",
             base_url="http://localhost:11434",
+            timeout=30,
         )
 
 
@@ -137,7 +143,10 @@ def test_embed_text_returns_a_single_embedding_vector(mock_post):
     mock_post.return_value = _mock_response(body={"embeddings": [[0.1, 0.2, 0.3]]})
 
     result = embed_text(
-        "Arsenal drew 1-1.", model="nomic-embed-text", base_url="http://localhost:11434"
+        "Arsenal drew 1-1.",
+        model="nomic-embed-text",
+        base_url="http://localhost:11434",
+        timeout=30,
     )
 
     assert result == [0.1, 0.2, 0.3]

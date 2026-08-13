@@ -26,7 +26,6 @@ def ensure_collection(
     client: QdrantClient,
     collection_name: str,
     vector_size: int,
-    distance: Distance = Distance.COSINE,
 ) -> None:
     """Create `collection_name` if it doesn't already exist. Idempotent.
 
@@ -40,6 +39,17 @@ def ensure_collection(
     Qdrant indexes dense vectors with HNSW by default - there's no
     alternative index to opt into, so this already satisfies the HNSW
     requirement with no manual tuning needed.
+
+    Distance is fixed to cosine, not an overridable parameter - it's the
+    metric `nomic-embed-text` (and this codebase's own semantic-cache
+    similarity check) is built around, not an environment-varying tunable
+    like `vector_size`. It was briefly a defaulted parameter with zero
+    real call sites ever passing a non-default value; self-review during
+    a hygiene audit flagged that as unused, speculative flexibility this
+    project's own conventions rule out, and as a real gap besides - the
+    mismatch check below only ever validated `vector_size`, so a caller
+    that did pass a different distance against an existing collection
+    would have been silently accepted instead of raising.
 
     Raises CollectionSchemaMismatchError if the collection already exists
     with a different dense vector size than requested, rather than
@@ -59,7 +69,7 @@ def ensure_collection(
     client.create_collection(
         collection_name=collection_name,
         vectors_config={
-            DENSE_VECTOR_NAME: VectorParams(size=vector_size, distance=distance)
+            DENSE_VECTOR_NAME: VectorParams(size=vector_size, distance=Distance.COSINE)
         },
         sparse_vectors_config={SPARSE_VECTOR_NAME: SparseVectorParams()},
     )

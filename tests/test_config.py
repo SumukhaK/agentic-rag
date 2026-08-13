@@ -171,10 +171,10 @@ def test_settings_defaults_reranker_settings(monkeypatch):
 
 def test_settings_reranker_settings_overridable_from_env(monkeypatch):
     monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
-    monkeypatch.setenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+    monkeypatch.setenv("RERANKER_MODEL", "some-other-reranker-model")
     monkeypatch.setenv("RERANK_TOP_K", "6")
 
     settings = Settings()
 
-    assert settings.reranker_model == "BAAI/bge-reranker-v2-m3"
+    assert settings.reranker_model == "some-other-reranker-model"
     assert settings.rerank_top_k == 6

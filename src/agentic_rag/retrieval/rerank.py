@@ -13,6 +13,9 @@ class RerankError(Exception):
 
 
 def _get_model(model_name: str) -> TextCrossEncoder:
+    """Reranker models load ONNX weights on first use; reuse one instance
+    per model name instead of reloading it on every call, same rationale
+    as sparse_client.py's model cache."""
     if model_name not in _model_cache:
         try:
             _model_cache[model_name] = TextCrossEncoder(model_name=model_name)

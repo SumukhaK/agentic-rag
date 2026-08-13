@@ -472,8 +472,13 @@ the reader has no way to detect on their own.
   to see, or content indicating a successful injection).
 - **Foul language refusal**: the system refuses to engage with foul/abusive
   language at any stage of the conversation.
-- Which model performs the injection judge and output-validation checks (the
-  local generation model vs. Claude) is an open item — see §14.
+- **Resolved**: the injection judge and output-validation checks are
+  performed by the **local generation model (`mistral`)**, not Claude — no
+  new `ANTHROPIC_API_KEY` needed, consistent with the local-first stack and
+  with deferring Claude-as-evaluator (Phase 5) for the same credential gap.
+  See §13's decision log for the full tradeoff, including a known,
+  previously-observed `mistral` reliability gap this decision doesn't
+  paper over.
 
 ## 13. Resolved Design Decisions
 
@@ -490,12 +495,44 @@ Log of decisions made explicitly during planning, for traceability:
 | Access-tier tagging mechanism | Folder-per-tier under the watched root | No extra file format to maintain; matches the watched-folder source of truth |
 | Semantic cache backend | In-memory, linear cosine similarity | No new infrastructure; mirrors `EmbeddingCache`'s established pattern for a much smaller, more ephemeral dataset than the document corpus |
 | Semantic cache scoping | Per `(query meaning, user_tier)`, not just query meaning | Follows directly from FR3 — a cached answer was generated from tier-filtered retrieval, so a different tier must never receive it |
+| Injection judge / output validation model | Local generation model (`mistral`) | See below — not a clean win, a deliberate tradeoff |
+
+**Injection judge / output validation model, in full**: the original open
+item named the real tradeoff — local `mistral` (fast, no external cost) vs.
+Claude (likely higher judgment quality, adds latency + an external API
+dependency). Choosing `mistral` doesn't make that tradeoff disappear, and
+it isn't a hypothetical risk: §10 already documents `mistral` failing to
+follow an explicit instruction in this exact codebase (`decompose_query`'s
+prompt asks it to return an already-simple question unchanged; it decomposed
+"Who won the match?" into 4 sub-questions anyway). A judge that's supposed
+to catch injection attempts or flag an out-of-tier citation is exactly the
+kind of task where an instruction-following miss is costly — a missed
+detection isn't a graceful degradation, it's a silent security gap.
+
+The decision stands anyway, for reasons specific to *this* use case rather
+than a blanket claim that quality doesn't matter:
+- **No new credential.** The same `ANTHROPIC_API_KEY` gap already deferred
+  Claude-as-evaluator in Phase 5; picking Claude here reopens that gap for
+  a security-critical path, which is a worse place to first hit it than an
+  offline evaluator.
+- **Narrower task than generation.** Judging ("does this look like an
+  injection attempt" / "is this citation in-range for the user's tier") is
+  closer to classification than the open-ended generation where `mistral`'s
+  instruction-following gap was actually observed. That's a reason for
+  cautious optimism, not a guarantee — it hasn't been verified for the
+  judge prompts specifically.
+- **Not the last word.** Phase 8's structured evaluation explicitly tracks
+  hallucination rate and faithfulness; a judge that's under-performing will
+  surface there rather than going unmeasured indefinitely. If it doesn't
+  meet a quality bar, revisiting this decision is a one-line config change
+  (`generation_model`), not a redesign — nothing about the judge's
+  implementation should hardcode `mistral`-specific assumptions.
+
+This is recorded as a live risk to watch during Phase 6 implementation and
+Phase 8 evaluation, not a settled non-issue.
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 
-- **Injection judge / output validation model**: local model (fast, no
-  external cost) vs. Claude (likely higher judgment quality, adds latency +
-  external API dependency). Needs a decision before Phase 6.
 - **Real access-tier names**: the linear tier list is a placeholder (§11)
   until the actual organizational roles are provided.
 - **Claude-as-evaluator scope and credentials**: no `ANTHROPIC_API_KEY` is

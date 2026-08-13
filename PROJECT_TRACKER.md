@@ -388,10 +388,29 @@ building unwired infrastructure to fill the slot.
         `embed_text()` has zero production callers anywhere in `src/` —
         spawned as a separate task to decide whether it's dead code to
         remove or a placeholder for an anticipated Phase 7 caller
+- [x] Injection judge / output-validation model decision — resolved as its
+      own PR, deliberately kept separate from the secrets/config audit
+      above (self-review on that PR correctly flagged the two as bundled,
+      unrelated concerns). **Local generation model (`mistral`), not
+      Claude** — no new `ANTHROPIC_API_KEY` needed. This is a real
+      tradeoff, not a clean win: `mistral` has an already-documented
+      instruction-following gap in this exact codebase (§10,
+      `decompose_query`), and a missed detection from a security judge is
+      a silent gap, not a graceful degradation. The decision stands on
+      task-specific reasoning (judging is narrower than the open-ended
+      generation where the gap was observed; Phase 8's evaluation will
+      surface under-performance rather than let it go unmeasured; nothing
+      about the judge's implementation should hardcode `mistral`-specific
+      assumptions, so revisiting this is a one-line config change if
+      needed) — see `docs/REQUIREMENTS.md` §13 for the full writeup. This
+      is recorded as a live risk to watch, not a settled non-issue
 - [ ] Configurable linear access-tier model (§11) wired end-to-end
-- [ ] Prompt-injection LLM judge — **blocked on model choice**, see
-      `docs/REQUIREMENTS.md` §14
-- [ ] Output/citation validation before returning an answer
+- [ ] Prompt-injection LLM judge (local `mistral`, per the decision above)
+- [ ] Output/citation security validation (local `mistral`) — distinct
+      from Phase 5's `_is_grounded()` (which only checks citation numbers
+      are in-range); this checks citations don't point outside the user's
+      access tier and chunk content doesn't show signs of a successful
+      injection (§12)
 - [ ] Foul-language refusal
 
 ## Phase 7 — API & Delivery

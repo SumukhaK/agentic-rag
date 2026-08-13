@@ -145,7 +145,8 @@ Shipped (`src/agentic_rag/orchestration/`, `src/agentic_rag/generation/`):
   `RerankError`) cost one retry attempt instead of aborting the whole
   call; `UnknownAccessTierError` (a config error) still fails fast
 
-**Phase 5 — Generation & Grounding: in progress.**
+**Phase 5 — Generation & Grounding: complete** (Claude-as-evaluator wiring
+deliberately deferred to Phase 8 — see `PROJECT_TRACKER.md`).
 
 Shipped (`src/agentic_rag/orchestration/answer.py`):
 - `generate_answer()` — takes Phase 4's `PlanningResult` straight through
@@ -167,6 +168,19 @@ Shipped (`src/agentic_rag/orchestration/answer.py`):
   corpus (retrieval always returns *something*), but `generate_answer()`
   correctly returned the fallback anyway — the model recognized the
   retrieved chunk didn't actually answer the question
+- `SemanticCache` + `answer_with_cache()`
+  (`src/agentic_rag/orchestration/semantic_cache.py`) — an in-memory,
+  linear-cosine-similarity cache from (query meaning, access tier) to a
+  previously generated answer. Scoped per `user_tier`, not just query
+  meaning, since a cached answer was generated from retrieval already
+  filtered to the tier that produced it (FR3) — two users at different
+  tiers must never share a cache entry. Live-verified: a repeat,
+  semantically-similar query at the same tier dropped from 50.8s to 2.2s
+  (cache hit); the identical rephrasing at a different tier correctly
+  missed the cache and re-ran the full pipeline, confirming tier isolation
+  holds in practice. Claude-as-evaluator wiring is deliberately deferred —
+  no Anthropic API key is configured for this project, and its detailed
+  spec belongs to Phase 8
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

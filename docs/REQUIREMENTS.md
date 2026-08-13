@@ -236,9 +236,26 @@ Two caching layers, both required, to meet the speed/reliability target:
   sequencing mistake in this roadmap's first draft, not a deliberate
   choice; corrected once Phase 3 was otherwise complete rather than
   building unwired infrastructure to fill the checklist slot early.
-
-Cache backend, eviction policy, and semantic-similarity threshold for the
-semantic cache are still open — see §14.
+  **Implemented as** `SemanticCache` + `answer_with_cache()`
+  (`src/agentic_rag/orchestration/semantic_cache.py`). Backend: **in-memory,
+  linear cosine similarity** — chosen over a second Qdrant collection since
+  it needs no new infrastructure and mirrors `EmbeddingCache`'s already-
+  established pattern for a dataset that's far smaller and more ephemeral
+  than the document corpus. Threshold: `Settings.semantic_cache_similarity_threshold`
+  (default 0.95, configurable). **Scoped per `user_tier`, not just query
+  meaning**: a cached answer was generated from retrieval already filtered
+  to the tier that produced it (§11/FR3), so two users at different tiers
+  asking near-identical questions must never share a cache entry — this
+  followed directly from FR3 rather than needing a separate decision.
+  **Verified live**: an initial query took 50.8s; a semantically-similar
+  rephrasing at the same tier returned the identical answer in 2.2s (cache
+  hit); the same rephrasing at a different tier correctly missed the cache
+  and re-ran the full pipeline (16.9s) — tier isolation confirmed in
+  practice, not just in mocked tests. Eviction policy and persistence
+  remain open — same caveat as `EmbeddingCache` (§7 above); a stale cached
+  answer can outlive the document that would have invalidated it, since
+  FR4's near-real-time freshness applies to retrieval, not to whatever the
+  cache decided to skip retrieval for.
 
 ## 8. Grounding & Answer Rules
 
@@ -454,6 +471,8 @@ Log of decisions made explicitly during planning, for traceability:
 | Document source-of-truth | Watched folder/filesystem | No separate upload service to build; fits documents already managed as files |
 | Chunk size | 2000 chars, no overlap, block-based (blank-line-separated) boundary detection | Simple, dependency-free, keeps semantic units intact per §4; overlap wasn't part of the stated requirement so it was left out rather than assumed |
 | Access-tier tagging mechanism | Folder-per-tier under the watched root | No extra file format to maintain; matches the watched-folder source of truth |
+| Semantic cache backend | In-memory, linear cosine similarity | No new infrastructure; mirrors `EmbeddingCache`'s established pattern for a much smaller, more ephemeral dataset than the document corpus |
+| Semantic cache scoping | Per `(query meaning, user_tier)`, not just query meaning | Follows directly from FR3 — a cached answer was generated from tier-filtered retrieval, so a different tier must never receive it |
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 
@@ -462,5 +481,9 @@ Log of decisions made explicitly during planning, for traceability:
   external API dependency). Needs a decision before Phase 6.
 - **Real access-tier names**: the linear tier list is a placeholder (§11)
   until the actual organizational roles are provided.
-- **Cache backend and semantic-similarity threshold** for the semantic cache
-  (§7).
+- **Claude-as-evaluator scope and credentials**: no `ANTHROPIC_API_KEY` is
+  configured for this project, and the detailed spec (what gets judged, what
+  rubric, what output format) isn't written down anywhere — only a
+  PROJECT_TRACKER.md checklist bullet and Phase 8's higher-level "retrieval
+  precision, faithfulness, hallucination rate" framing exist. Needs both an
+  API key and a written spec before Phase 8 starts.

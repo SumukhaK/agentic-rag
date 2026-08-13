@@ -259,10 +259,42 @@ building unwired infrastructure to fill the slot.
       as sub-question count grows (flagged by the efficiency review angle;
       needs a token-budgeting design decision, not a quick fix — noted here
       rather than guessed at)
-- [ ] Claude-as-evaluator wiring (offline eval, not in the live answer path)
-- [ ] Semantic cache (query-meaning-keyed answer cache) — moved from Phase 3;
-      needs a decision on cache backend and similarity threshold, see
-      `docs/REQUIREMENTS.md` §14
+- [ ] Claude-as-evaluator wiring (offline eval, not in the live answer path) —
+      **deliberately deferred**: no `ANTHROPIC_API_KEY` is configured for this
+      project (checked — only Claude Code's own runtime auth exists, not
+      reusable for calling the Claude API from this project's Python code),
+      and the detailed spec (retrieval precision, faithfulness, hallucination
+      rate) lives under Phase 8's Structured Evaluation, not here — building
+      it now without either the credential or the spec risked inventing
+      architecture Phase 8 would have to redo
+- [x] Semantic cache (query-meaning-keyed answer cache) — backend decided:
+      **in-memory, linear cosine similarity** (recommended and chosen over a
+      second Qdrant collection — consistent with `EmbeddingCache`'s existing
+      in-memory pattern, no new infrastructure for a much smaller, more
+      ephemeral dataset than the document corpus). **Implemented as**
+      `SemanticCache` + `answer_with_cache()`
+      (`src/agentic_rag/orchestration/semantic_cache.py`). `SemanticCache`
+      is a pure `get`/`put` primitive (cosine similarity, no I/O);
+      `answer_with_cache()` embeds the query, checks the cache, and on a
+      miss runs `plan_and_retrieve()` + `generate_answer()` and populates
+      the cache with the result. **Scoped per `user_tier`, not just query
+      meaning** — a cached answer was generated from retrieval already
+      filtered to the tier that produced it (FR3), so two users at
+      different tiers asking near-identical questions must never share a
+      cache entry; this was a deliberate security-driven design choice, not
+      something left to the similarity threshold to sort out. Threshold is
+      `Settings.semantic_cache_similarity_threshold` (default 0.95),
+      configurable per the established pattern. **Verified live**: an
+      initial query took 50.8s (full pipeline); a semantically-near-
+      identical rephrasing at the same tier returned the identical answer
+      in 2.2s (cache hit); the same rephrasing at a different tier
+      correctly missed the cache and re-ran the full pipeline (16.9s),
+      confirming tier isolation holds in practice, not just in tests.
+      **Known, deliberately deferred** (same precedent as `EmbeddingCache`):
+      no persistence across restarts, no eviction/TTL — a stale cached
+      answer can outlive the document that would have invalidated it
+      (FR4's near-real-time freshness applies to retrieval, not to
+      whatever the cache decided to skip retrieval for)
 
 ## Phase 6 — Access Control & Security
 

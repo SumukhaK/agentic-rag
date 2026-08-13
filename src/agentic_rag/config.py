@@ -24,3 +24,4 @@ class Settings(BaseSettings):
     generation_model: str = "mistral"
     generation_timeout_seconds: int = 60
     max_retrieval_attempts: int = 5
+    semantic_cache_similarity_threshold: float = 0.95

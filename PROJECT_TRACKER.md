@@ -102,7 +102,13 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       Fusion of results → top 10 candidates: these are one Qdrant
       operation, not two — `hybrid_search()` uses `prefetch` (dense +
       sparse) + `FusionQuery(fusion=Fusion.RRF)` in a single call, up to
-      `RETRIEVAL_TOP_K_CANDIDATES` (default 10) results
+      `RETRIEVAL_TOP_K_CANDIDATES` (default 10) results. Prefetch
+      over-fetches 4× `top_k` per leg (RRF only ranks over what was
+      already fetched, so equal limits would silently drop competitive
+      candidates ranked just outside `top_k` on both legs). Dense and
+      sparse query embedding run concurrently (thread pool), not
+      sequentially, since dense is a blocking Ollama call and this is the
+      hottest path in the system
       (`src/agentic_rag/retrieval/search.py`)
 - [x] Access-control filtering applied before fusion/reranking (FR3):
       `allowed_tiers_for()` (`src/agentic_rag/retrieval/access.py`)

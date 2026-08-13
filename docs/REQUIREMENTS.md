@@ -153,6 +153,15 @@ visual diagram; this is the authoritative step list:
    Qdrant call (`prefetch` + `FusionQuery(fusion=Fusion.RRF)`), not
    "search, then separately fuse" as two steps; Qdrant's native hybrid query
    API does both at once.
+   - **Prefetch over-fetches** (4× `top_k` per leg) rather than fetching
+     exactly `top_k` from each leg. RRF only ranks over what each `Prefetch`
+     already returned — if the per-leg limit equalled the final limit, a
+     chunk ranked just outside `top_k` on *both* legs individually, but
+     competitive after fusion, would never be fetched at all.
+   - **Dense and sparse query embedding run concurrently** (a thread pool),
+     not sequentially: dense is a blocking Ollama HTTP round-trip, sparse is
+     local CPU work, and this runs on every query — the hottest path in the
+     system, per the fast/reliable NFR in §2.
 5. **Reranking**: a **local open-source cross-encoder** (e.g.
    `BAAI/bge-reranker-v2-m3`, run locally) reranks the top 10 and selects the
    **top 4** chunks. *(Not yet implemented — next.)*

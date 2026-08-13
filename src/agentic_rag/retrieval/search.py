@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from qdrant_client import QdrantClient
@@ -15,6 +16,14 @@ from agentic_rag.embedding.ollama_client import embed_texts
 from agentic_rag.embedding.sparse_client import embed_sparse_texts
 from agentic_rag.indexing.qdrant_setup import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME
 from agentic_rag.retrieval.access import allowed_tiers_for
+
+# Qdrant's RRF fusion only ranks over what each leg's prefetch already
+# returned. If prefetch limit == the final limit, a candidate ranked just
+# outside top_k on BOTH legs individually - but competitive after fusion -
+# would never be fetched at all. Over-fetching per leg is the standard fix;
+# 4x is a common, conservative starting point with no established tuning
+# need yet.
+_PREFETCH_OVERFETCH_FACTOR = 4
 
 
 @dataclass(frozen=True)
@@ -57,23 +66,37 @@ def hybrid_search(
         must=[FieldCondition(key="access_tier", match=MatchAny(any=allowed_tiers))]
     )
 
-    dense_vector = embed_with_cache(
-        [query],
-        model=embedding_model,
-        cache=embedding_cache,
-        embed_fn=lambda batch: embed_texts(
-            batch,
+    def embed_dense() -> list[float]:
+        return embed_with_cache(
+            [query],
             model=embedding_model,
-            base_url=ollama_base_url,
-            timeout=embedding_timeout_seconds,
-        ),
-    )[0]
-    sparse_vector = embed_with_cache(
-        [query],
-        model=sparse_model,
-        cache=embedding_cache,
-        embed_fn=lambda batch: embed_sparse_texts(batch, model_name=sparse_model),
-    )[0]
+            cache=embedding_cache,
+            embed_fn=lambda batch: embed_texts(
+                batch,
+                model=embedding_model,
+                base_url=ollama_base_url,
+                timeout=embedding_timeout_seconds,
+            ),
+        )[0]
+
+    def embed_sparse():
+        return embed_with_cache(
+            [query],
+            model=sparse_model,
+            cache=embedding_cache,
+            embed_fn=lambda batch: embed_sparse_texts(batch, model_name=sparse_model),
+        )[0]
+
+    # Dense embedding is a blocking Ollama HTTP round-trip; sparse is local
+    # CPU work. Run them concurrently rather than paying both latencies
+    # back-to-back on every query - this is the hottest path in the system.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        dense_future = executor.submit(embed_dense)
+        sparse_future = executor.submit(embed_sparse)
+        dense_vector = dense_future.result()
+        sparse_vector = sparse_future.result()
+
+    prefetch_limit = top_k * _PREFETCH_OVERFETCH_FACTOR
 
     result = client.query_points(
         collection_name=collection_name,
@@ -81,13 +104,13 @@ def hybrid_search(
             Prefetch(
                 query=dense_vector,
                 using=DENSE_VECTOR_NAME,
-                limit=top_k,
+                limit=prefetch_limit,
                 filter=access_filter,
             ),
             Prefetch(
                 query=sparse_vector,
                 using=SPARSE_VECTOR_NAME,
-                limit=top_k,
+                limit=prefetch_limit,
                 filter=access_filter,
             ),
         ],

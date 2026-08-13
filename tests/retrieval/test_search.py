@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -124,3 +124,28 @@ def test_hybrid_search_respects_top_k(client):
 def test_hybrid_search_raises_for_an_unknown_user_tier(client):
     with pytest.raises(UnknownAccessTierError):
         _search(client, "Arsenal", user_tier="not-a-tier")
+
+
+def test_hybrid_search_returns_empty_list_for_an_empty_collection(client):
+    assert _search(client, "Arsenal", user_tier="tier-1") == []
+
+
+def test_hybrid_search_returns_empty_list_when_nothing_matches_the_users_tier(client):
+    _index(client, "tier-2/a.txt", "Arsenal internal transfer budget report.", "tier-2")
+
+    assert _search(client, "Arsenal", user_tier="tier-1") == []
+
+
+def test_hybrid_search_prefetches_more_than_top_k_for_accurate_fusion(client):
+    # Qdrant's RRF fusion only ranks over what each leg's prefetch already
+    # returned. If prefetch limit == the final limit, a candidate ranked
+    # just outside top_k on BOTH legs individually - but competitive after
+    # fusion - would never be fetched at all. Prefetch must over-fetch.
+    with patch.object(client, "query_points") as mock_query_points:
+        mock_query_points.return_value = Mock(points=[])
+        _search(client, "Arsenal", user_tier="tier-1", top_k=10)
+
+    call_kwargs = mock_query_points.call_args.kwargs
+    for prefetch in call_kwargs["prefetch"]:
+        assert prefetch.limit > 10
+    assert call_kwargs["limit"] == 10

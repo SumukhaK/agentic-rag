@@ -141,8 +141,14 @@ building unwired infrastructure to fill the slot.
       Phase 5's final answer generation will reuse with a different
       prompt. See `docs/REQUIREMENTS.md` §10 for why `mistral` over
       Mixtral (~4.1GB vs. ~26GB)
-- [ ] Orchestrator: history + query rewriting on every turn (next)
-- [ ] Sub-question decomposition
+- [x] Orchestrator: history + query rewriting on every turn: `rewrite_query()`
+      (`src/agentic_rag/orchestration/rewrite.py`) — given prior
+      `ConversationTurn`s + the new query, prompts `generate()` for a
+      single standalone question. Returns the query unchanged with no LLM
+      call when there's no history (first turn is already standalone).
+      Verified live: correctly resolved "them"/"it" pronouns from a prior
+      turn into a fully self-contained retrieval query
+- [ ] Sub-question decomposition (next)
 - [ ] Retry/replanning loop (up to 5 turns) on insufficient evidence
 - [ ] Canonical "I do not know" fallback wired to both direct no-match and
       exhausted-retry paths

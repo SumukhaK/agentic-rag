@@ -19,3 +19,5 @@ class Settings(BaseSettings):
     qdrant_collection_name: str = "documents"
     sparse_embedding_model: str = "Qdrant/bm25"
     retrieval_top_k_candidates: int = 10
+    reranker_model: str = "BAAI/bge-reranker-base"
+    rerank_top_k: int = 4

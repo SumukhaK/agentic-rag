@@ -156,3 +156,25 @@ def test_settings_retrieval_top_k_candidates_overridable_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.retrieval_top_k_candidates == 20
+
+
+def test_settings_defaults_reranker_settings(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    for key in ("RERANKER_MODEL", "RERANK_TOP_K"):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = Settings()
+
+    assert settings.reranker_model == "BAAI/bge-reranker-base"
+    assert settings.rerank_top_k == 4
+
+
+def test_settings_reranker_settings_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+    monkeypatch.setenv("RERANK_TOP_K", "6")
+
+    settings = Settings()
+
+    assert settings.reranker_model == "BAAI/bge-reranker-v2-m3"
+    assert settings.rerank_top_k == 6

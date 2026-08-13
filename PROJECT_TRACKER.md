@@ -117,7 +117,14 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       disallowed chunk never enters the candidate pool fusion ranks over.
       Verified live: a tier-2-only chunk never appeared in a tier-1 user's
       results, with correct relevance ranking (RRF) on top
-- [ ] Reranker (local cross-encoder) → top 4 chunks (next)
+- [x] Reranker (local cross-encoder) → top 4 chunks: `rerank()` via
+      `fastembed`'s `TextCrossEncoder` (`BAAI/bge-reranker-base` —
+      substituted for the originally-named `bge-reranker-v2-m3`, which
+      `fastembed` doesn't support; same model family, avoids adding
+      `sentence-transformers`/PyTorch as a new dependency). Configurable
+      via `RERANKER_MODEL`/`RERANK_TOP_K`. Verified live end-to-end with
+      `hybrid_search()`: sharper relevance separation than the fused RRF
+      score alone (`src/agentic_rag/retrieval/rerank.py`)
 - [ ] Semantic cache (query-meaning-keyed answer cache)
 
 ## Phase 4 — Orchestration & Multi-Turn Chat

@@ -388,10 +388,64 @@ building unwired infrastructure to fill the slot.
         `embed_text()` has zero production callers anywhere in `src/` —
         spawned as a separate task to decide whether it's dead code to
         remove or a placeholder for an anticipated Phase 7 caller
+- [x] Injection judge / output-validation model decision — resolved as its
+      own PR (`docs/injection-judge-model-decision`, unbundled from the
+      secrets/config audit PR after self-review there flagged them as two
+      unrelated concerns bundled together — that PR's title was corrected
+      after the fact to drop the "resolve judge-model decision" wording it
+      had merged with, since the content was already split out before the
+      title update landed). **Local generation model (`mistral`), not
+      Claude** — no new `ANTHROPIC_API_KEY` needed. This is a real
+      tradeoff, not a clean win: `mistral` has an already-documented
+      instruction-following gap in this exact codebase (§10,
+      `decompose_query`'s prompt asked it to return an already-simple
+      question unchanged; it decomposed "Who won the match?" into 4
+      sub-questions anyway), and a missed detection from a security judge
+      is a silent gap, not a graceful degradation.
+      The decision stands on task-specific reasoning: no new credential
+      needed for a security-critical path (Claude would reopen the
+      `ANTHROPIC_API_KEY` gap already deferred for Claude-as-evaluator,
+      which is a Phase 8 blocker per `docs/REQUIREMENTS.md` §14, not a
+      Phase 5 one — Phase 5 is only where that gap was first *noticed*);
+      and judging is narrower than the open-ended generation where the
+      `mistral` gap was actually observed, though that's cautious optimism
+      rather than a guarantee, since it hasn't been verified for the judge
+      prompts specifically. **What actually closes the risk, not just
+      manages it**: Phase 8's evaluation metrics (retrieval precision,
+      faithfulness, hallucination rate) do **not** measure
+      injection-detection or citation-security-validation accuracy — that
+      was an overclaim in an earlier version of this note, caught on
+      self-review. Relying on Phase 8 to "catch" a bad judge would mean it
+      never gets caught. Instead, **Phase 6's implementation of the judge
+      and the output-validation check must each be validated against a
+      small, fixed set of known injection/benign prompts and
+      in-tier/out-of-tier citation cases, with an explicit pass bar,
+      before either is considered done** — this is a Definition-of-Done
+      requirement for the two unchecked items below, not optional
+      follow-up. Whether the judge shares `Settings.generation_model` or
+      needs its own field is **not decided here** — an earlier version of
+      this note claimed reusing `generation_model` was "a one-line config
+      change," which presupposes reusing it is correct without having
+      decided that; sharing it would silently couple the judge's model
+      choice to any future change made purely for answer-generation
+      quality, so this is left as an explicit decision for whoever
+      implements the judge, not assumed. This is recorded as a live risk
+      to watch during Phase 6 implementation, not a settled non-issue —
+      see `docs/REQUIREMENTS.md` §13 for the one-line summary (the full
+      reasoning lives here, not duplicated there)
 - [ ] Configurable linear access-tier model (§11) wired end-to-end
-- [ ] Prompt-injection LLM judge — **blocked on model choice**, see
-      `docs/REQUIREMENTS.md` §14
-- [ ] Output/citation validation before returning an answer
+- [ ] Prompt-injection LLM judge (local `mistral`, per the decision above)
+      — screens incoming user queries for injection attempts before
+      they're used in retrieval or generation (§12). Not done until
+      validated against a fixed set of known injection/benign prompts per
+      the decision above
+- [ ] Output/citation security validation (local `mistral`) — distinct
+      from Phase 5's `_is_grounded()` (which only checks citation numbers
+      are in-range). Checks citations and underlying chunks for security
+      threats or malfunction generally (§12) — a citation pointing outside
+      the user's access tier and content indicating a successful injection
+      are the two known examples, not an exhaustive list. Not done until
+      validated per the decision above
 - [ ] Foul-language refusal
 
 ## Phase 7 — API & Delivery

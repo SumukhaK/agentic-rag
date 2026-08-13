@@ -162,9 +162,21 @@ visual diagram; this is the authoritative step list:
      not sequentially: dense is a blocking Ollama HTTP round-trip, sparse is
      local CPU work, and this runs on every query — the hottest path in the
      system, per the fast/reliable NFR in §2.
-5. **Reranking**: a **local open-source cross-encoder** (e.g.
-   `BAAI/bge-reranker-v2-m3`, run locally) reranks the top 10 and selects the
-   **top 4** chunks. *(Not yet implemented — next.)*
+5. **Reranking**: a **local open-source cross-encoder** reranks the top 10
+   and selects the **top 4** chunks. **Implemented as** `rerank()`
+   (`src/agentic_rag/retrieval/rerank.py`) via `fastembed`'s
+   `TextCrossEncoder`, using `BAAI/bge-reranker-base` rather than the
+   originally-named `BAAI/bge-reranker-v2-m3` — `fastembed` doesn't support
+   the v2-m3 variant (`TextCrossEncoder.list_supported_models()` confirms
+   this), and `bge-reranker-base` is the same model family, staying
+   consistent with the rest of the stack's dependency footprint (no new
+   heavy ML framework like `sentence-transformers`/PyTorch, which
+   `bge-reranker-v2-m3` would otherwise require). `RERANKER_MODEL` is
+   configurable if a different model is wanted later. Verified live:
+   correctly separates a directly-relevant chunk from tangentially-related
+   and irrelevant ones with much sharper score separation than the fused
+   hybrid-search score alone. Each candidate's `score` field is replaced
+   with the reranker's own relevance score.
 6. **Generation**: the top 4 chunks + the grounding rules (§8) + the
    (rewritten) user query are assembled into the final prompt and sent to the
    generation LLM (Mistral/Mixtral via Ollama) to produce the answer.

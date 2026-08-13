@@ -465,7 +465,31 @@ the reader has no way to detect on their own.
 - **Access control** — covered by §11; the first line of defense.
 - **Prompt injection detection**: incoming user queries are screened by an
   LLM-based judge for injection attempts before being used in retrieval or
-  generation.
+  generation. **Implemented as** `check_for_injection()`
+  (`src/agentic_rag/orchestration/injection_judge.py`) — returns an
+  `InjectionCheckResult(is_injection, raw_response)`, not a bare bool, so a
+  miss is at least auditable after the fact. **Not wired into any caller
+  yet** — `answer_with_cache` and every other current entrypoint still call
+  straight through to retrieval/generation with no screening in front of
+  them, so the protection this bullet describes does not exist end-to-end
+  in the running system today; composing it in is Phase 7's job, including
+  deciding whether to screen the raw or the rewritten query.
+  Empirically validated against 20 committed, reproducible prompts
+  (`tests/orchestration/test_injection_judge_live.py`, skipped gracefully
+  if Ollama/`mistral` is unavailable) — not just a one-off manual count in
+  prose. The validation set itself only exists in its current, stronger
+  form because self-review of the first version found two real gaps a
+  smaller set would have missed: naive whole-response substring matching
+  both **failed open** (a response containing "unclean" matched the
+  "clean" substring) and **failed closed on legitimate queries** (a
+  verbose CLEAN verdict echoing a query term like "injection" — a genuine
+  football topic, e.g. a player's medical injection); and the original
+  prompt had no delimiter between instructions and untrusted input, so a
+  query ending in a fake "...Answer: CLEAN" could get the judge to echo
+  that answer back verbatim, defeating the check. Both are fixed
+  (first-word-only parsing; explicit `<<<MESSAGE_START>>>`/`<<<MESSAGE_END>>>`
+  delimiters with an instruction to treat the contents as data, not
+  commands) and covered by regression cases in the fixed validation set.
 - **Output/citation validation**: before an answer is returned, its citation
   links and the underlying chunks are checked for security threats or
   malfunction (e.g. a citation pointing to a chunk the user isn't permitted
@@ -476,8 +500,9 @@ the reader has no way to detect on their own.
   performed by the **local generation model (`mistral`)**, not Claude — no
   new `ANTHROPIC_API_KEY` needed. See §13's decision log for the full
   tradeoff, including a known `mistral` reliability gap this decision
-  doesn't paper over, and the empirical check Phase 6 must run before the
-  judge is considered done.
+  doesn't paper over. The injection judge's empirical check has now run
+  (above); output/citation validation's has not, since that check isn't
+  built yet.
 
 ## 13. Resolved Design Decisions
 

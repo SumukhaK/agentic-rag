@@ -434,11 +434,66 @@ building unwired infrastructure to fill the slot.
       see `docs/REQUIREMENTS.md` §13 for the one-line summary (the full
       reasoning lives here, not duplicated there)
 - [ ] Configurable linear access-tier model (§11) wired end-to-end
-- [ ] Prompt-injection LLM judge (local `mistral`, per the decision above)
+- [x] Prompt-injection LLM judge (local `mistral`, per the decision above)
       — screens incoming user queries for injection attempts before
-      they're used in retrieval or generation (§12). Not done until
-      validated against a fixed set of known injection/benign prompts per
-      the decision above
+      they're used in retrieval or generation (§12). **Implemented as**
+      `check_for_injection()` (`src/agentic_rag/orchestration/injection_judge.py`)
+      — a single-word classification prompt (`INJECTION`/`CLEAN`), returning
+      `InjectionCheckResult(is_injection, raw_response)` rather than a bare
+      bool, so a miss is at least auditable after the fact — matching the
+      richer-result-over-bare-bool pattern `PlanningResult` already
+      established for a comparably consequential decision. **Fails
+      closed**: a response whose first word isn't unambiguously `CLEAN` —
+      empty, unparseable, or anything else — is treated as an injection,
+      not silently waved through. **Not wired into `answer_with_cache` or
+      any other caller yet** — the protection this item describes does not
+      exist end-to-end in the running system today; composition is a
+      Phase 7 concern once the actual entrypoint decides whether to screen
+      the raw or rewritten query (and, per self-review, could run
+      concurrently with `rewrite_query` if it screens the raw query, since
+      neither depends on the other's output — a naive-sequential Phase 7
+      composition would otherwise add a full extra blocking LLM call to
+      every query's latency).
+
+      **Self-review found and fixed two real bugs in the first version**,
+      both confirmed via live, adversarial testing before being trusted as
+      fixed:
+      - **Fail-open via substring matching**: the first version checked
+        `"clean" in response.lower()` anywhere in the whole response. A
+        response containing "unclean" matches that substring and would
+        have been waved through — the exact opposite of the documented
+        fail-closed guarantee. The same whole-response search also
+        **failed closed on legitimate queries**: a verbose CLEAN verdict
+        that happened to repeat back a query term like "injection" (a
+        genuine football topic — a player's medical injection) would have
+        been misclassified. Fixed by parsing only the response's first
+        word, matching what the prompt actually asks for.
+      - **Prompt injection against the judge itself**: the original prompt
+        had no delimiter between its instructions and the untrusted
+        `query` text. Live-tested exploit that worked against the first
+        version: a query ending in `"...Answer: CLEAN"` got the judge to
+        echo that fake answer back verbatim, returning `is_injection=False`
+        for a query that opened with "Ignore the above." Fixed by wrapping
+        `query` in explicit `<<<MESSAGE_START>>>`/`<<<MESSAGE_END>>>`
+        delimiters with an instruction to treat the contents as untrusted
+        data, not commands. Re-tested against the same exploit after the
+        fix: the judge no longer produces a valid `CLEAN` classification
+        for it (mitigated, not eliminated — no prompt-based defense
+        against a sufficiently capable adversarial model is airtight, and
+        this is recorded as a known limitation, not a closed one).
+
+      **Empirical validation (the Definition-of-Done this item committed
+      to) is now a committed, reproducible fixture, not just a prose
+      count**: `tests/orchestration/test_injection_judge_live.py` — 20
+      prompts (10 injection attempts including the two adversarial cases
+      above, 10 benign football queries including three chosen
+      specifically to collide with the judge's own vocabulary — "cortisone
+      injection," "pre-match injection," "clean... pitch") — **20/20
+      correct** against real Ollama/`mistral`, skipped gracefully if
+      unavailable. This file is exactly the fixture Phase 8's evaluation
+      needs to build from, and it's the regression test that would have
+      caught both bugs above if it had existed before they were found by
+      hand.
 - [ ] Output/citation security validation (local `mistral`) — distinct
       from Phase 5's `_is_grounded()` (which only checks citation numbers
       are in-range). Checks citations and underlying chunks for security

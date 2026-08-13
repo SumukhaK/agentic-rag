@@ -228,8 +228,12 @@ Two caching layers, both required, to meet the speed/reliability target:
     when Phase 7 is designed, not an assumption baked in here.
 - **Semantic cache**: cache answers keyed on query *meaning*, so
   semantically-similar repeat questions can be served without re-running the
-  full retrieval + generation pipeline. Not yet implemented — a Phase 3/5
-  concern (this is about caching final *answers*, not embeddings).
+  full retrieval + generation pipeline. **Moved from Phase 3 to Phase 5** —
+  it caches the final generated *answer*, and there's no answer to cache
+  until generation exists (Phase 5). Listing it under Retrieval was a
+  sequencing mistake in this roadmap's first draft, not a deliberate
+  choice; corrected once Phase 3 was otherwise complete rather than
+  building unwired infrastructure to fill the checklist slot early.
 
 Cache backend, eviction policy, and semantic-similarity threshold for the
 semantic cache are still open — see §14.

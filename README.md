@@ -100,8 +100,27 @@ Shipped (`src/agentic_rag/indexing/`, `src/agentic_rag/embedding/`):
   content across different documents skips re-embedding (verified live:
   ~6.6s → ~0.006s on a cache hit)
 
-**Phase 3 — Retrieval Pipeline: not started.** Parallel hybrid search,
-fusion to top 10, reranking to top 4.
+**Phase 3 — Retrieval Pipeline: complete.**
+
+Shipped (`src/agentic_rag/retrieval/`):
+- `hybrid_search()` — dense + sparse search against Qdrant, natively fused
+  (RRF) in one call. Prefetches 4× the final limit per leg (RRF only ranks
+  over what was already fetched — equal limits would silently drop
+  competitive candidates). Dense and sparse query embedding run
+  concurrently, not sequentially
+- Access-tier filtering (`allowed_tiers_for()`) applied to *both* search
+  legs before fusion, not to the fused result afterward (FR3) — verified
+  live: a tier-2-only document never appeared in a tier-1 user's results
+- `rerank()` — local cross-encoder (`BAAI/bge-reranker-base`, substituted
+  for the unsupported `bge-reranker-v2-m3`) reranks the top 10 to a top 4,
+  replacing the fusion score with a sharper relevance signal
+
+Semantic cache (originally listed under this phase) is moved to Phase 5 —
+it caches generated *answers*, and there's no answer to cache until
+generation exists.
+
+**Phase 4 — Orchestration & Multi-Turn Chat: not started.** Query/history
+rewriting, sub-question decomposition, retry/replanning loop.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

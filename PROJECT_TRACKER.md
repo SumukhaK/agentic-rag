@@ -125,7 +125,12 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       via `RERANKER_MODEL`/`RERANK_TOP_K`. Verified live end-to-end with
       `hybrid_search()`: sharper relevance separation than the fused RRF
       score alone (`src/agentic_rag/retrieval/rerank.py`)
-- [ ] Semantic cache (query-meaning-keyed answer cache)
+
+**Phase 3 complete.** Semantic cache was originally listed here but is
+moved to Phase 5 (see below) — it caches *answers*, and there's no answer
+to cache until generation exists. Listing it under Retrieval was a
+sequencing mistake made when this roadmap was first drafted; not
+building unwired infrastructure to fill the slot.
 
 ## Phase 4 — Orchestration & Multi-Turn Chat
 
@@ -142,6 +147,9 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
 - [ ] Citation enforcement (source + access level on every factual claim)
 - [ ] No-outside-knowledge enforcement
 - [ ] Claude-as-evaluator wiring (offline eval, not in the live answer path)
+- [ ] Semantic cache (query-meaning-keyed answer cache) — moved from Phase 3;
+      needs a decision on cache backend and similarity threshold, see
+      `docs/REQUIREMENTS.md` §14
 
 ## Phase 6 — Access Control & Security
 

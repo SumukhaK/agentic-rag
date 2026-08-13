@@ -77,3 +77,20 @@ def test_generate_raises_generation_error_on_a_non_json_body(mock_post):
 
     with pytest.raises(GenerationError):
         generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=30)
+
+
+@patch("agentic_rag.generation.llm_client.requests.post")
+def test_generate_reports_a_non_json_body_as_an_unexpected_response_not_unreachable(
+    mock_post,
+):
+    # requests.exceptions.JSONDecodeError is BOTH a RequestException and a
+    # ValueError - if the except clauses are ordered wrong, this gets
+    # miscategorized as "failed to reach Ollama" when Ollama actually
+    # responded, just with a body that couldn't be parsed. The message
+    # should say so, not blame connectivity.
+    mock_post.return_value = _mock_response(
+        json_side_effect=requests.exceptions.JSONDecodeError("bad json", "", 0)
+    )
+
+    with pytest.raises(GenerationError, match="unexpected response"):
+        generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=30)

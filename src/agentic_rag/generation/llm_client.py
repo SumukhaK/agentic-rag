@@ -18,7 +18,12 @@ def generate(prompt: str, model: str, base_url: str, timeout: int) -> str:
         )
         response.raise_for_status()
         return response.json()["response"]
+    except (ValueError, KeyError) as exc:
+        # requests.exceptions.JSONDecodeError (raised by response.json() on
+        # a malformed body) is BOTH a ValueError and a RequestException, so
+        # this branch must be checked first - Ollama did respond, it just
+        # sent something unparseable; that's not the same failure as being
+        # unreachable, and the message shouldn't conflate the two.
+        raise GenerationError(f"unexpected response from Ollama: {exc}") from exc
     except requests.RequestException as exc:
         raise GenerationError(f"failed to reach Ollama: {exc}") from exc
-    except (ValueError, KeyError) as exc:
-        raise GenerationError(f"unexpected response from Ollama: {exc}") from exc

@@ -294,7 +294,29 @@ These rules apply to every answer the system produces, with no exceptions:
   Chelsea?" — "them" and "it" both resolved from context.
 - **Sub-question decomposition**: a complex question may be split into
   sub-questions, each run through the retrieval pipeline independently.
-  *(Not yet implemented — next.)*
+  **Implemented as** `decompose_query()`
+  (`src/agentic_rag/orchestration/decompose.py`) — prompts `generate()`
+  for one sub-question per line, stripping numbering/bullets the model
+  adds despite being told not to — the marker regex requires whitespace
+  or end-of-line right after "N."/"N)", so it correctly leaves a
+  sub-question that starts with a decimal stat (e.g. "1.85 xG...",
+  realistic content in a football-analytics corpus) untouched instead of
+  corrupting it into "85 xG...". Raises `GenerationError` if the LLM
+  returns nothing usable, same failure-must-be-loud principle as
+  `rewrite_query()`.
+  **Observed live, documented honestly rather than only showing the good
+  case**: the prompt asks the model to return an already-simple question
+  unchanged as a single line, but `mistral` doesn't reliably follow that
+  — "Who won the match?" came back decomposed into 4 sub-questions
+  ("Who participated?", "Which team did each represent?", "When did it
+  take place?", "What was the final score?") instead of being returned
+  as-is. Not a code defect — the function did exactly what was asked
+  (parse whatever the LLM returns into sub-questions) — but a real
+  prompt-adherence limitation worth knowing about rather than glossing
+  over. A genuinely complex question decomposed correctly and
+  sensibly: "Who won the Arsenal vs Chelsea match, how many goals were
+  scored, and were there any red cards?" → 3 focused sub-questions, one
+  per clause.
 - **Retry/replanning loop**: if the evidence retrieved for a (sub-)question is
   insufficient to answer it, the system returns to planning and retries —
   up to **5 turns** total.

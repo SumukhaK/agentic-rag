@@ -148,7 +148,17 @@ building unwired infrastructure to fill the slot.
       call when there's no history (first turn is already standalone).
       Verified live: correctly resolved "them"/"it" pronouns from a prior
       turn into a fully self-contained retrieval query
-- [ ] Sub-question decomposition (next)
+- [x] Sub-question decomposition: `decompose_query()`
+      (`src/agentic_rag/orchestration/decompose.py`) — one sub-question
+      per line of the LLM's response, list markers stripped. Raises
+      `GenerationError` on a result with no usable sub-questions.
+      Verified live — worth knowing: `mistral` doesn't reliably return an
+      already-simple question unchanged despite being instructed to (see
+      `docs/REQUIREMENTS.md` §10 for the observed example); a genuinely
+      complex question decomposed cleanly into one sub-question per clause
+- [ ] Retry/replanning loop (up to 5 turns) on insufficient evidence (next)
+- [ ] Canonical "I do not know" fallback wired to both direct no-match and
+      exhausted-retry paths
 - [ ] Retry/replanning loop (up to 5 turns) on insufficient evidence
 - [ ] Canonical "I do not know" fallback wired to both direct no-match and
       exhausted-retry paths

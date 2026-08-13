@@ -1,6 +1,15 @@
 from unittest.mock import patch
 
-from agentic_rag.orchestration.planning import plan_and_retrieve
+import pytest
+
+from agentic_rag.embedding.ollama_client import EmbeddingError
+from agentic_rag.generation.llm_client import GenerationError
+from agentic_rag.orchestration.planning import (
+    CANNOT_ANSWER_MESSAGE,
+    plan_and_retrieve,
+)
+from agentic_rag.retrieval.access import UnknownAccessTierError
+from agentic_rag.retrieval.rerank import RerankError
 from agentic_rag.retrieval.search import SearchCandidate
 
 KWARGS = dict(
@@ -50,6 +59,7 @@ def test_plan_and_retrieve_succeeds_on_first_attempt(
     assert [o.sub_question for o in result.outcomes] == ["Who won it?", "How many goals?"]
     assert all(o.candidates for o in result.outcomes)
     assert mock_decompose.call_count == 1
+    assert result.message is None
 
 
 @patch("agentic_rag.orchestration.planning.rerank")
@@ -83,6 +93,7 @@ def test_plan_and_retrieve_exhausts_retries_and_reports_insufficient(
     assert result.sufficient is False
     assert result.attempts_used == 3
     assert mock_decompose.call_count == 3
+    assert result.message == CANNOT_ANSWER_MESSAGE
     mock_rerank.assert_not_called()
 
 
@@ -116,4 +127,91 @@ def test_plan_and_retrieve_respects_max_attempts_of_one(
 
     assert result.sufficient is False
     assert result.attempts_used == 1
+    assert mock_decompose.call_count == 1
+
+
+@patch("agentic_rag.orchestration.planning.rerank")
+@patch("agentic_rag.orchestration.planning.hybrid_search")
+@patch("agentic_rag.orchestration.planning.decompose_query")
+def test_plan_and_retrieve_retries_after_a_transient_decompose_failure(
+    mock_decompose, mock_search, mock_rerank
+):
+    # A single bad LLM response is exactly the kind of transient failure
+    # the retry budget exists to absorb - it must cost one attempt, not
+    # abort the whole call.
+    mock_decompose.side_effect = [GenerationError("mistral returned nothing usable"), ["Who won it?"]]
+    mock_search.return_value = [_candidate()]
+    mock_rerank.return_value = [_candidate()]
+
+    result = plan_and_retrieve(**KWARGS)
+
+    assert result.sufficient is True
+    assert result.attempts_used == 2
+    assert mock_decompose.call_count == 2
+
+
+@patch("agentic_rag.orchestration.planning.rerank")
+@patch("agentic_rag.orchestration.planning.hybrid_search")
+@patch("agentic_rag.orchestration.planning.decompose_query")
+def test_plan_and_retrieve_retries_after_a_transient_search_failure(
+    mock_decompose, mock_search, mock_rerank
+):
+    mock_decompose.return_value = ["Who won it?"]
+    mock_search.side_effect = [EmbeddingError("Ollama unreachable"), [_candidate()]]
+    mock_rerank.return_value = [_candidate()]
+
+    result = plan_and_retrieve(**KWARGS)
+
+    assert result.sufficient is True
+    assert result.attempts_used == 2
+
+
+@patch("agentic_rag.orchestration.planning.rerank")
+@patch("agentic_rag.orchestration.planning.hybrid_search")
+@patch("agentic_rag.orchestration.planning.decompose_query")
+def test_plan_and_retrieve_retries_after_a_transient_rerank_failure(
+    mock_decompose, mock_search, mock_rerank
+):
+    mock_decompose.return_value = ["Who won it?"]
+    mock_search.return_value = [_candidate()]
+    mock_rerank.side_effect = [RerankError("cross-encoder failed"), [_candidate()]]
+
+    result = plan_and_retrieve(**KWARGS)
+
+    assert result.sufficient is True
+    assert result.attempts_used == 2
+
+
+@patch("agentic_rag.orchestration.planning.rerank")
+@patch("agentic_rag.orchestration.planning.hybrid_search")
+@patch("agentic_rag.orchestration.planning.decompose_query")
+def test_plan_and_retrieve_reports_insufficient_when_every_attempt_fails_transiently(
+    mock_decompose, mock_search, mock_rerank
+):
+    mock_decompose.return_value = ["Who won it?"]
+    mock_search.side_effect = EmbeddingError("Ollama unreachable")
+
+    result = plan_and_retrieve(**{**KWARGS, "max_attempts": 2})
+
+    assert result.sufficient is False
+    assert result.attempts_used == 2
+    assert result.outcomes == []
+    assert result.message == CANNOT_ANSWER_MESSAGE
+
+
+@patch("agentic_rag.orchestration.planning.rerank")
+@patch("agentic_rag.orchestration.planning.hybrid_search")
+@patch("agentic_rag.orchestration.planning.decompose_query")
+def test_plan_and_retrieve_does_not_retry_an_unknown_access_tier(
+    mock_decompose, mock_search, mock_rerank
+):
+    # A bad user_tier is a configuration error, not a transient failure -
+    # retrying with a fresh decomposition can never fix it, so it must
+    # propagate immediately instead of burning the retry budget.
+    mock_decompose.return_value = ["Who won it?"]
+    mock_search.side_effect = UnknownAccessTierError("tier-9 is not a known tier")
+
+    with pytest.raises(UnknownAccessTierError):
+        plan_and_retrieve(**KWARGS)
+
     assert mock_decompose.call_count == 1

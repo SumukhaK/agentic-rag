@@ -344,11 +344,23 @@ These rules apply to every answer the system produces, with no exceptions:
   generation (Phase 5), not a retrieval-time score threshold.
 - If, after `max_retrieval_attempts` turns, no sufficiently-evidenced answer
   was found, the system returns the canonical fallback message from §8 rule
-  2 — `CANNOT_ANSWER_MESSAGE` in `planning.py`. The same constant, and the
-  same `PlanningResult(sufficient=False, ...)` code path, covers both a
-  direct no-match on the very first attempt and exhausting all retries; a
-  single message is used for all "couldn't answer" cases (see the
-  design-decisions log in §13).
+  2 — `CANNOT_ANSWER_MESSAGE` in `planning.py`, exposed on the result as
+  `PlanningResult.message` (`None` when `sufficient=True`). The same
+  constant, and the same `PlanningResult(sufficient=False, ...)` code path,
+  covers both a direct no-match on the very first attempt and exhausting
+  all retries; a single message is used for all "couldn't answer" cases
+  (see the design-decisions log in §13).
+- **Transient vs. configuration failures during retrieval**: if
+  `decompose_query`, `hybrid_search`, or `rerank` raises mid-attempt
+  (`GenerationError`, `EmbeddingError`, `SparseEmbeddingError`,
+  `RerankError`) — e.g. a dropped Ollama connection — that costs one retry
+  attempt, same as the attempt finding no evidence; a self-review on PR #24
+  caught that the first version let any such exception propagate straight
+  out and abort the whole call, defeating the retry budget's purpose.
+  `UnknownAccessTierError` is excluded from this and still propagates
+  immediately — a bad `user_tier` is a configuration error, not something a
+  fresh decomposition could ever fix, so retrying it would just waste the
+  budget on a guaranteed-repeat failure.
 
 ## 11. Access Control
 

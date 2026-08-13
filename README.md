@@ -139,7 +139,11 @@ Shipped (`src/agentic_rag/orchestration/`, `src/agentic_rag/generation/`):
   rejected — live testing showed relevant/irrelevant candidates produce
   overlapping score ranges for short, generic questions, so the coarse
   non-empty signal stayed. `CANNOT_ANSWER_MESSAGE` is the single fallback
-  string for both a direct no-match and an exhausted retry budget
+  string, exposed as `PlanningResult.message`, for both a direct no-match
+  and an exhausted retry budget. Transient callee failures
+  (`GenerationError`, `EmbeddingError`, `SparseEmbeddingError`,
+  `RerankError`) cost one retry attempt instead of aborting the whole
+  call; `UnknownAccessTierError` (a config error) still fails fast
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

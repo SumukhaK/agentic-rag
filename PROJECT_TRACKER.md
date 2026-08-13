@@ -177,7 +177,26 @@ building unwired infrastructure to fill the slot.
       reused for both the direct no-match path (insufficient on the first
       attempt) and the exhausted-retry path, since both collapse to the
       same `PlanningResult(sufficient=False, ...)` outcome; there was never
-      a need for two separate code paths
+      a need for two separate code paths. Actually wired onto the result
+      (not just defined): `PlanningResult.message` carries the constant
+      when `sufficient=False`, `None` otherwise — self-review on PR #24
+      caught that the first version defined the constant but never
+      attached it to anything a caller could read
+- [x] Self-review hardening (PR #24): `plan_and_retrieve()`'s attempt loop
+      had no exception handling — a single transient failure from
+      `decompose_query`/`hybrid_search`/`rerank` (e.g. a dropped Ollama
+      connection) propagated straight out and aborted the entire retry
+      budget on the spot, defeating the loop's purpose. Three independent
+      review angles converged on this same bug. Fixed: `GenerationError`,
+      `EmbeddingError`, `SparseEmbeddingError`, and `RerankError` are now
+      caught per attempt and treated as "this attempt found nothing, try
+      again"; `UnknownAccessTierError` is deliberately left uncaught since
+      a bad `user_tier` is a config error no retry can fix. The
+      per-sub-question retrieve+rerank logic was also extracted into
+      `_retrieve_outcome()` to give the try/except a single, clear
+      boundary. (One review finding — a claimed 40-line function-length
+      CLAUDE.md violation — was checked against this repo's actual
+      `.claude/CLAUDE.md` and found to not exist; not acted on.)
 
 ## Phase 5 — Generation & Grounding
 

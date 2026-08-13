@@ -200,10 +200,41 @@ building unwired infrastructure to fill the slot.
 
 ## Phase 5 — Generation & Grounding
 
-- [ ] Prompt assembly: top-4 chunks + grounding rules + query
-- [ ] Generation via `mistral` (Ollama) — reuses `generate()` from Phase 4
-- [ ] Citation enforcement (source + access level on every factual claim)
-- [ ] No-outside-knowledge enforcement
+- [x] Prompt assembly + generation via `mistral`: `generate_answer()`
+      (`src/agentic_rag/orchestration/answer.py`) — takes a `PlanningResult`
+      straight from Phase 4's `plan_and_retrieve()`. If insufficient,
+      returns `planning_result.message` (the canonical fallback) directly
+      with **no LLM call** — nothing to ground an answer in, so calling the
+      model would only risk it reaching for outside knowledge. Otherwise
+      flattens+deduplicates candidates across every sub-question's outcome
+      (the same chunk can be evidence for more than one sub-question — a
+      dedup by `(relative_path, chunk_index)` keeps it out of the prompt
+      twice) into a citation-numbered source list (`[1]`, `[2]`, ...,
+      each labelled with its source path + access tier) and calls
+      `generate()`. Reconciles the original architecture's "top 4 chunks"
+      framing with Phase 4's decomposition: with N sub-questions the
+      evidence set is N × `rerank_top_k` before dedup, not a fixed 4 — the
+      original figure described the single-question case before
+      decomposition existed
+- [x] Citation enforcement + no-outside-knowledge enforcement (§8 rules 1
+      and 3), first pass: encoded directly into the generation prompt
+      (cite `[N]` per claim, never use knowledge beyond the numbered
+      sources) rather than validated after the fact yet — output-side
+      validation (confirming the model's answer actually cites a real
+      source number) is a separate, sharper follow-up, not bundled into
+      this task
+- [x] "I do not know" enforcement (§8 rule 2), **verified live as a working
+      second line of defense**: the retrieval-only `sufficient` signal
+      (Phase 4) is coarse and can be `True` even when nothing relevant was
+      actually found (a 1-document corpus returns *something* for any
+      query). Live-tested against the real Ollama/Qdrant stack: asking
+      "What is the capital of France?" against a football-only corpus
+      still resolved `sufficient=True` from `plan_and_retrieve`, but
+      `generate_answer()`'s prompt-level instruction caught what the
+      retrieval signal missed — `mistral` correctly returned
+      `CANNOT_ANSWER_MESSAGE` verbatim instead of fabricating an answer
+      from the irrelevant chunk. This is exactly the deferred-to-Phase-5
+      answerability judgment Phase 4's docstring anticipated
 - [ ] Claude-as-evaluator wiring (offline eval, not in the live answer path)
 - [ ] Semantic cache (query-meaning-keyed answer cache) — moved from Phase 3;
       needs a decision on cache backend and similarity threshold, see

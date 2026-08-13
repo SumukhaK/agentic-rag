@@ -255,6 +255,24 @@ These rules apply to every answer the system produces, with no exceptions:
    documents to generate an answer — no reliance on the LLM's parametric
    knowledge for factual claims.
 
+**Implemented as** `generate_answer()` (`src/agentic_rag/orchestration/answer.py`).
+All three rules are encoded directly in the generation prompt: sources are
+listed with a citation number plus their path and access tier (rule 1), the
+model is instructed to reply with the canonical fallback verbatim if the
+sources don't suffice (rule 2), and told not to use knowledge beyond what's
+given (rule 3). When Phase 4's `plan_and_retrieve` already reports
+`sufficient=False`, `generate_answer` returns `planning_result.message`
+directly with no LLM call at all — the fastest and most certain way to
+satisfy rule 2 for that case. **Verified live that rule 2 is a genuine
+second line of defense, not just a formality**: `plan_and_retrieve`'s
+`sufficient` signal is a coarse, retrieval-only heuristic (§10) that came
+back `True` for "What is the capital of France?" against a football-only
+corpus, since retrieval always returns its nearest candidate even when
+nothing is actually relevant. `generate_answer()` caught it anyway —
+`mistral`, given the actual (irrelevant) chunk, correctly recognized it
+didn't answer the question and returned the canonical fallback instead of
+fabricating an answer.
+
 ## 9. Functional Requirements
 
 | ID | Requirement |

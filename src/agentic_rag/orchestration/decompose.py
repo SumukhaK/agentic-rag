@@ -8,11 +8,15 @@ Question: {query}
 
 Sub-questions:"""
 
-_LIST_MARKER_RE = re.compile(r"^(?:\d+[.)]|[-*•])\s*")
+_LIST_MARKER_RE = re.compile(r"^(?:\d+[.)](?=\s|$)|[-*•])\s*")
 
 
 def _clean_line(line: str) -> str:
-    return _LIST_MARKER_RE.sub("", line.strip()).strip()
+    # The digit-marker branch requires whitespace or end-of-line right
+    # after the "N." / "N)", so it only matches an actual enumeration
+    # prefix - not the start of a decimal number like "1.85 xG", which is
+    # realistic sub-question content in this domain.
+    return _LIST_MARKER_RE.sub("", line.strip())
 
 
 def decompose_query(query: str, *, model: str, base_url: str, timeout: int) -> list[str]:

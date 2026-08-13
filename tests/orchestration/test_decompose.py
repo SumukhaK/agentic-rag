@@ -49,6 +49,19 @@ def test_decompose_query_strips_numbering_and_bullets(mock_generate):
 
 
 @patch("agentic_rag.orchestration.decompose.generate")
+def test_decompose_query_does_not_strip_decimal_numbers_at_the_start_of_a_line(
+    mock_generate,
+):
+    # "1.85 xG" is realistic content in this domain, not a list marker -
+    # the marker regex must not treat "1." here as an enumeration prefix.
+    mock_generate.return_value = "1.85 xG - is that higher than Arsenal's average?"
+
+    result = decompose_query("Complex question", **KWARGS)
+
+    assert result == ["1.85 xG - is that higher than Arsenal's average?"]
+
+
+@patch("agentic_rag.orchestration.decompose.generate")
 def test_decompose_query_ignores_blank_lines(mock_generate):
     mock_generate.return_value = "Who won the match?\n\n\nHow many goals?"
 

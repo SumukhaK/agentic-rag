@@ -318,11 +318,49 @@ These rules apply to every answer the system produces, with no exceptions:
   scored, and were there any red cards?" → 3 focused sub-questions, one
   per clause.
 - **Retry/replanning loop**: if the evidence retrieved for a (sub-)question is
-  insufficient to answer it, the system returns to planning and retries —
-  up to **5 turns** total.
-- If, after 5 turns, no sufficiently-evidenced answer was found, the system
-  returns the canonical fallback message from §8 rule 2. (A single message is
-  used for all "couldn't answer" cases — see the design-decisions log in §13.)
+  insufficient to answer it, the system returns to planning and retries — up
+  to `Settings.max_retrieval_attempts` turns total (default **5**;
+  **configurable, not hardcoded**, per explicit instruction — same rationale
+  as the access-tier list in §11: a number chosen once shouldn't require a
+  code change to revisit). **Implemented as** `plan_and_retrieve()`
+  (`src/agentic_rag/orchestration/planning.py`) — each attempt fully
+  re-decomposes the query (fresh LLM phrasing is the only thing that can
+  plausibly change the result against a deterministic corpus and
+  embeddings), then retrieves + reranks per sub-question. "Sufficient" means
+  every sub-question has at least one candidate chunk after reranking — a
+  coarse, retrieval-only signal, not an answer-quality judgment, since
+  answer quality isn't knowable until generation exists (Phase 5).
+  **Tried and rejected**: a fixed cutoff on the reranker's own score, as a
+  tighter "is this actually relevant" check. Live-tested against the
+  reranker, a genuinely relevant candidate ("Who played for Arsenal against
+  Chelsea?", answerable from the indexed corpus) scored **-5.88** — worse
+  than a genuinely irrelevant one ("What is the name of the capital of
+  France?") at **-4.44**. Relevant/irrelevant score ranges overlap too much
+  for a global threshold to separate them reliably for short,
+  generically-phrased questions, so any cutoff would either drop real
+  evidence or let noise through depending on the query — worse than the
+  coarse non-empty signal it would have replaced. Real answerability
+  judgment needs the LLM to reason over the retrieved text, which belongs to
+  generation (Phase 5), not a retrieval-time score threshold.
+- If, after `max_retrieval_attempts` turns, no sufficiently-evidenced answer
+  was found, the system returns the canonical fallback message from §8 rule
+  2 — `CANNOT_ANSWER_MESSAGE` in `planning.py`, exposed on the result as
+  `PlanningResult.message` (`None` when `sufficient=True`). The same
+  constant, and the same `PlanningResult(sufficient=False, ...)` code path,
+  covers both a direct no-match on the very first attempt and exhausting
+  all retries; a single message is used for all "couldn't answer" cases
+  (see the design-decisions log in §13).
+- **Transient vs. configuration failures during retrieval**: if
+  `decompose_query`, `hybrid_search`, or `rerank` raises mid-attempt
+  (`GenerationError`, `EmbeddingError`, `SparseEmbeddingError`,
+  `RerankError`) — e.g. a dropped Ollama connection — that costs one retry
+  attempt, same as the attempt finding no evidence; a self-review on PR #24
+  caught that the first version let any such exception propagate straight
+  out and abort the whole call, defeating the retry budget's purpose.
+  `UnknownAccessTierError` is excluded from this and still propagates
+  immediately — a bad `user_tier` is a configuration error, not something a
+  fresh decomposition could ever fix, so retrying it would just waste the
+  budget on a guaranteed-repeat failure.
 
 ## 11. Access Control
 

@@ -156,12 +156,47 @@ building unwired infrastructure to fill the slot.
       already-simple question unchanged despite being instructed to (see
       `docs/REQUIREMENTS.md` §10 for the observed example); a genuinely
       complex question decomposed cleanly into one sub-question per clause
-- [ ] Retry/replanning loop (up to 5 turns) on insufficient evidence (next)
-- [ ] Canonical "I do not know" fallback wired to both direct no-match and
-      exhausted-retry paths
-- [ ] Retry/replanning loop (up to 5 turns) on insufficient evidence
-- [ ] Canonical "I do not know" fallback wired to both direct no-match and
-      exhausted-retry paths
+- [x] Retry/replanning loop on insufficient evidence: `plan_and_retrieve()`
+      (`src/agentic_rag/orchestration/planning.py`) — decomposes, retrieves,
+      and reranks per sub-question; if any sub-question comes back with no
+      reranked candidates, retries by re-decomposing from scratch (fresh
+      LLM phrasing is the only thing that can plausibly change results
+      against a deterministic corpus). Attempt budget is
+      `Settings.max_retrieval_attempts` (default 5) — configurable, not
+      hardcoded, per explicit instruction. "Sufficient" is deliberately a
+      coarse retrieval-only signal (candidates non-empty after rerank), not
+      an answer-quality judgment: a fixed cutoff on the reranker's own
+      score was tried and rejected after live testing showed relevant and
+      irrelevant candidates produce overlapping score ranges for short,
+      generic questions (a genuinely relevant candidate scored -5.88,
+      worse than a genuinely irrelevant one at -4.44). Real answerability
+      judgment needs the LLM to reason over retrieved text, which belongs
+      to generation (Phase 5), not a retrieval-time score threshold
+- [x] Canonical "I do not know" fallback: `CANNOT_ANSWER_MESSAGE`
+      (`src/agentic_rag/orchestration/planning.py`) — single constant
+      reused for both the direct no-match path (insufficient on the first
+      attempt) and the exhausted-retry path, since both collapse to the
+      same `PlanningResult(sufficient=False, ...)` outcome; there was never
+      a need for two separate code paths. Actually wired onto the result
+      (not just defined): `PlanningResult.message` carries the constant
+      when `sufficient=False`, `None` otherwise — self-review on PR #24
+      caught that the first version defined the constant but never
+      attached it to anything a caller could read
+- [x] Self-review hardening (PR #24): `plan_and_retrieve()`'s attempt loop
+      had no exception handling — a single transient failure from
+      `decompose_query`/`hybrid_search`/`rerank` (e.g. a dropped Ollama
+      connection) propagated straight out and aborted the entire retry
+      budget on the spot, defeating the loop's purpose. Three independent
+      review angles converged on this same bug. Fixed: `GenerationError`,
+      `EmbeddingError`, `SparseEmbeddingError`, and `RerankError` are now
+      caught per attempt and treated as "this attempt found nothing, try
+      again"; `UnknownAccessTierError` is deliberately left uncaught since
+      a bad `user_tier` is a config error no retry can fix. The
+      per-sub-question retrieve+rerank logic was also extracted into
+      `_retrieve_outcome()` to give the try/except a single, clear
+      boundary. (One review finding — a claimed 40-line function-length
+      CLAUDE.md violation — was checked against this repo's actual
+      `.claude/CLAUDE.md` and found to not exist; not acted on.)
 
 ## Phase 5 — Generation & Grounding
 

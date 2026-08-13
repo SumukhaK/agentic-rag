@@ -23,3 +23,4 @@ class Settings(BaseSettings):
     rerank_top_k: int = 4
     generation_model: str = "mistral"
     generation_timeout_seconds: int = 60
+    max_retrieval_attempts: int = 5

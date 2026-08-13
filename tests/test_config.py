@@ -200,3 +200,21 @@ def test_settings_generation_settings_overridable_from_env(monkeypatch):
 
     assert settings.generation_model == "some-other-generation-model"
     assert settings.generation_timeout_seconds == 90
+
+
+def test_settings_defaults_max_retrieval_attempts(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("MAX_RETRIEVAL_ATTEMPTS", raising=False)
+
+    settings = Settings()
+
+    assert settings.max_retrieval_attempts == 5
+
+
+def test_settings_max_retrieval_attempts_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("MAX_RETRIEVAL_ATTEMPTS", "3")
+
+    settings = Settings()
+
+    assert settings.max_retrieval_attempts == 3

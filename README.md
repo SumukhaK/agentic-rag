@@ -121,8 +121,29 @@ Semantic cache (originally listed under this phase) is moved to Phase 5 —
 it caches generated *answers*, and there's no answer to cache until
 generation exists.
 
-**Phase 4 — Orchestration & Multi-Turn Chat: not started.** Query/history
-rewriting, sub-question decomposition, retry/replanning loop.
+**Phase 4 — Orchestration & Multi-Turn Chat: complete.**
+
+Shipped (`src/agentic_rag/orchestration/`, `src/agentic_rag/generation/`):
+- `generate()` (`generation/llm_client.py`) — wraps Ollama's `/api/generate`;
+  shared by rewriting, decomposition, and (Phase 5) final answer generation
+- `rewrite_query()` — folds conversation history + a new query into one
+  self-contained query (FR2); no LLM call when there's no history yet
+- `decompose_query()` — splits a query into sub-questions, one per LLM
+  response line, with list-marker stripping that leaves decimal stats
+  (e.g. "1.85 xG") untouched
+- `plan_and_retrieve()` — decomposes, retrieves, and reranks per
+  sub-question; retries by re-decomposing (up to
+  `Settings.max_retrieval_attempts`, default 5, configurable) if any
+  sub-question comes back with no reranked candidates. A fixed cutoff on
+  the reranker's own score was tried as a tighter relevance signal and
+  rejected — live testing showed relevant/irrelevant candidates produce
+  overlapping score ranges for short, generic questions, so the coarse
+  non-empty signal stayed. `CANNOT_ANSWER_MESSAGE` is the single fallback
+  string, exposed as `PlanningResult.message`, for both a direct no-match
+  and an exhausted retry budget. Transient callee failures
+  (`GenerationError`, `EmbeddingError`, `SparseEmbeddingError`,
+  `RerankError`) cost one retry attempt instead of aborting the whole
+  call; `UnknownAccessTierError` (a config error) still fails fast
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

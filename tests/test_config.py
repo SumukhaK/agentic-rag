@@ -218,3 +218,39 @@ def test_settings_max_retrieval_attempts_overridable_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.max_retrieval_attempts == 3
+
+
+def test_settings_defaults_semantic_cache_similarity_threshold(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("SEMANTIC_CACHE_SIMILARITY_THRESHOLD", raising=False)
+
+    settings = Settings()
+
+    assert settings.semantic_cache_similarity_threshold == 0.95
+
+
+def test_settings_semantic_cache_similarity_threshold_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("SEMANTIC_CACHE_SIMILARITY_THRESHOLD", "0.9")
+
+    settings = Settings()
+
+    assert settings.semantic_cache_similarity_threshold == 0.9
+
+
+def test_settings_defaults_semantic_cache_ttl_seconds(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("SEMANTIC_CACHE_TTL_SECONDS", raising=False)
+
+    settings = Settings()
+
+    assert settings.semantic_cache_ttl_seconds == 300.0
+
+
+def test_settings_semantic_cache_ttl_seconds_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("SEMANTIC_CACHE_TTL_SECONDS", "60")
+
+    settings = Settings()
+
+    assert settings.semantic_cache_ttl_seconds == 60.0

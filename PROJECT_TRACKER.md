@@ -259,10 +259,79 @@ building unwired infrastructure to fill the slot.
       as sub-question count grows (flagged by the efficiency review angle;
       needs a token-budgeting design decision, not a quick fix — noted here
       rather than guessed at)
-- [ ] Claude-as-evaluator wiring (offline eval, not in the live answer path)
-- [ ] Semantic cache (query-meaning-keyed answer cache) — moved from Phase 3;
-      needs a decision on cache backend and similarity threshold, see
-      `docs/REQUIREMENTS.md` §14
+- [ ] Claude-as-evaluator wiring (offline eval, not in the live answer path) —
+      **deliberately deferred**: no `ANTHROPIC_API_KEY` is configured for this
+      project (checked — only Claude Code's own runtime auth exists, not
+      reusable for calling the Claude API from this project's Python code),
+      and the detailed spec (retrieval precision, faithfulness, hallucination
+      rate) lives under Phase 8's Structured Evaluation, not here — building
+      it now without either the credential or the spec risked inventing
+      architecture Phase 8 would have to redo
+- [x] Semantic cache (query-meaning-keyed answer cache) — backend decided:
+      **in-memory, linear cosine similarity** (recommended and chosen over a
+      second Qdrant collection — consistent with `EmbeddingCache`'s existing
+      in-memory pattern, no new infrastructure for a much smaller, more
+      ephemeral dataset than the document corpus). **Implemented as**
+      `SemanticCache` + `answer_with_cache()`
+      (`src/agentic_rag/orchestration/semantic_cache.py`). `SemanticCache`
+      is a pure `get`/`put` primitive (cosine similarity, no I/O);
+      `answer_with_cache()` embeds the query, checks the cache, and on a
+      miss runs `plan_and_retrieve()` + `generate_answer()` and populates
+      the cache with the result. **Scoped per `user_tier`, not just query
+      meaning** — a cached answer was generated from retrieval already
+      filtered to the tier that produced it (FR3), so two users at
+      different tiers asking near-identical questions must never share a
+      cache entry; this was a deliberate security-driven design choice, not
+      something left to the similarity threshold to sort out. Threshold is
+      `Settings.semantic_cache_similarity_threshold` (default 0.95),
+      configurable per the established pattern. **Verified live**: an
+      initial query took 50.8s (full pipeline); a semantically-near-
+      identical rephrasing at the same tier returned the identical answer
+      in 2.2s (cache hit); the same rephrasing at a different tier
+      correctly missed the cache and re-ran the full pipeline (16.9s),
+      confirming tier isolation holds in practice, not just in tests.
+- [x] Self-review hardening (PR #26): 8 finder angles surfaced a
+      genuinely serious gap — three independently converged on it.
+      Caching `CANNOT_ANSWER_MESSAGE` created a **negative cache that
+      never self-corrects**: if a document answering a question is
+      ingested moments after that question was asked (well within FR4's
+      near-real-time freshness target), every semantically-similar repeat
+      kept getting served the stale fallback instead of reaching the
+      now-correct pipeline. Sharper still: because this system's access
+      model is folder-per-tier (§11), moving a document to a stricter
+      tier is a normal, supported reclassification — a cached answer has
+      no hook to detect that and could keep serving content a user is no
+      longer authorized to see. Fixed with two layers: (1)
+      `answer_with_cache` never caches when `planning_result.sufficient`
+      is `False`, **and** never caches when the generated answer's text
+      contains the fallback phrase even if `sufficient` was `True` —
+      live-tested and confirmed necessary: `plan_and_retrieve`'s coarse
+      signal can still misfire on a tiny corpus, and the model hedged
+      with an answer that opened with the fallback phrase but tacked on
+      a technically-in-range citation that passed `_is_grounded()`;
+      checking `sufficient` alone would have cached it anyway; (2) a
+      configurable TTL (`Settings.semantic_cache_ttl_seconds`, default
+      300s) bounds — doesn't eliminate — how long *any* cached answer,
+      including a correctly-cached grounded one, can outlive the document
+      it cites. Also fixed: `_CacheEntry` now scoped by `embedding_model`
+      too (a cross-model dimension mismatch previously crashed `get()`
+      instead of degrading to a miss); `_entries` restructured from a
+      flat list to `dict[tier, list]` (a lookup no longer scans other
+      tiers' entries first); cosine similarity clamped to `[-1, 1]`
+      (floating point drift could otherwise reject an exact self-match
+      at a threshold of exactly 1.0); extracted `embed_query_dense()`
+      (`src/agentic_rag/embedding/cache.py`) to remove duplicated
+      embed-with-cache wiring between `hybrid_search` and this module;
+      merged `test_answer_with_cache.py` into `test_semantic_cache.py`
+      per this repo's own test-file-mirrors-source-file convention, which
+      the first version broke. **Known, deliberately deferred** (same
+      precedent as `EmbeddingCache`): no persistence across restarts, no
+      re-validation of a cached answer's grounding at read time (only
+      checked once, at write time), and `answer_with_cache` still returns
+      only a bare `str` — a caller has no way to resolve `[1]`/`[2]`
+      citations back to source metadata, on a hit or a miss. Solving that
+      properly means deciding the API response shape, which belongs to
+      Phase 7, not guessed at here.
 
 ## Phase 6 — Access Control & Security
 

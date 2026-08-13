@@ -1,5 +1,7 @@
 from typing import Callable, TypeVar
 
+from agentic_rag.embedding.ollama_client import embed_texts
+
 T = TypeVar("T")
 
 
@@ -62,3 +64,19 @@ def embed_with_cache(
             results[index] = vector
 
     return results  # type: ignore[return-value]
+
+
+def embed_query_dense(
+    query: str, *, model: str, base_url: str, timeout: int, cache: EmbeddingCache
+) -> list[float]:
+    """Embed a single query string as a dense vector, through the shared
+    cache - the common "one query, cache-aware" pattern used by both
+    hybrid search's dense leg and the semantic cache's lookup embedding.
+    Pulled out once both needed the identical embed_with_cache+embed_texts
+    wiring, rather than kept duplicated across two call sites."""
+    return embed_with_cache(
+        [query],
+        model=model,
+        cache=cache,
+        embed_fn=lambda batch: embed_texts(batch, model=model, base_url=base_url, timeout=timeout),
+    )[0]

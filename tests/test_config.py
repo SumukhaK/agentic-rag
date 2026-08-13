@@ -138,3 +138,21 @@ def test_settings_sparse_embedding_model_overridable_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.sparse_embedding_model == "Qdrant/other-sparse-model"
+
+
+def test_settings_defaults_retrieval_top_k_candidates(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("RETRIEVAL_TOP_K_CANDIDATES", raising=False)
+
+    settings = Settings()
+
+    assert settings.retrieval_top_k_candidates == 10
+
+
+def test_settings_retrieval_top_k_candidates_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("RETRIEVAL_TOP_K_CANDIDATES", "20")
+
+    settings = Settings()
+
+    assert settings.retrieval_top_k_candidates == 20

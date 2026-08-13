@@ -145,20 +145,31 @@ visual diagram; this is the authoritative step list:
    a single, self-contained query (contextualization for multi-turn chat —
    see §10). This happens on every new user turn.
 3. **Embedding**: the rewritten query is embedded (`nomic-embed-text`).
-4. **Parallel hybrid search**: dense vector search and sparse/keyword (BM25)
-   search run in parallel against Qdrant, each contributing candidates.
-5. **Fusion**: the two result sets are merged/fused into a single ranked list;
-   the **top 10** combined candidates are kept.
-6. **Reranking**: a **local open-source cross-encoder** (e.g.
+4. **Parallel hybrid search, fused**: dense vector search and sparse/keyword
+   (BM25) search run against Qdrant with the access-control filter applied to
+   *both* legs, natively fused (RRF) into one ranked list of up to
+   `RETRIEVAL_TOP_K_CANDIDATES` (default 10) candidates. **Implemented as**
+   `hybrid_search()` (`src/agentic_rag/retrieval/search.py`) — this is one
+   Qdrant call (`prefetch` + `FusionQuery(fusion=Fusion.RRF)`), not
+   "search, then separately fuse" as two steps; Qdrant's native hybrid query
+   API does both at once.
+5. **Reranking**: a **local open-source cross-encoder** (e.g.
    `BAAI/bge-reranker-v2-m3`, run locally) reranks the top 10 and selects the
-   **top 4** chunks.
-7. **Generation**: the top 4 chunks + the grounding rules (§8) + the
+   **top 4** chunks. *(Not yet implemented — next.)*
+6. **Generation**: the top 4 chunks + the grounding rules (§8) + the
    (rewritten) user query are assembled into the final prompt and sent to the
    generation LLM (Mistral/Mixtral via Ollama) to produce the answer.
 
 All retrieval (step 4 onward) is subject to the access-control filter in §11
 — a candidate the user isn't permitted to see must never reach step 5, let
-alone be cited in an answer.
+alone be cited in an answer. **Implemented as**: `hybrid_search()` computes
+`allowed_tiers_for(user_tier, known_tiers)`
+(`src/agentic_rag/retrieval/access.py`) and applies it as a Qdrant
+`Filter(FieldCondition(access_tier, MatchAny(allowed_tiers)))` on each of the
+dense and sparse `Prefetch` queries — a disallowed chunk is excluded from the
+candidate pool Qdrant fuses over, not filtered out of the result afterward.
+Verified live: a tier-2-only chunk never appeared in a tier-1 user's results,
+in a real search against a real Ollama-embedded query.
 
 ## 7. Caching
 

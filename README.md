@@ -367,6 +367,16 @@ Shipped so far (`src/agentic_rag/api/`):
   failures elsewhere. All 16 new/updated mocked tests and the full suite
   pass with 0 failures; live fixtures skip gracefully rather than lying
   about being verified. See `PROJECT_TRACKER.md`'s Phase 7 log.
+- **`generate()`'s `temperature` made required, closing the bug class for
+  good** — the same "forgot to pin it" bug had now been independently
+  reintroduced three times (`generate_answer`, `rewrite_query`,
+  `decompose_query`), each caught only after the fact. By this point every
+  real call site already passed `temperature` explicitly, so the optional
+  `None` default was pure unused risk. Removed it — `generate()` now takes
+  a required keyword-only `temperature: float` and always builds the
+  Ollama `options` payload. No behavior change for any existing caller
+  (full suite: 267 passed, 0 failures); a future caller simply can't
+  reintroduce this bug a fourth time by omission.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

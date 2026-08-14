@@ -280,8 +280,14 @@ Shipped so far (`src/agentic_rag/api/`):
   product decision, not an assumption. Converts the request's `history`
   into `ConversationTurn`s, calls `rewrite_query()` then
   `answer_with_cache()`. Citations are embedded directly in the answer
-  text by `generate_answer()`'s own grounding prompt, not a separate
-  field. **Security judges are not composed in yet** — deliberately
+  text by `generate_answer()`'s own grounding prompt, not returned as a
+  separate field — **a real FR1 gap self-review caught**, not a settled
+  design choice: an API client has no way to resolve an inline `[1]`
+  marker to an actual document, since `answer_with_cache()` discards the
+  retrieved chunks' path/tier metadata once it produces the answer
+  string. Fixing it means changing shared Phase 5 return/cache shapes, so
+  it's tracked as its own follow-up rather than papered over here.
+  **Security judges are not composed in yet** — deliberately
   sequenced to land after the concurrent judge-hardening/generalization
   work merged, rather than building against three files mid-refactor.
 - **Live-verified end-to-end**, not just mocked: indexed a real document

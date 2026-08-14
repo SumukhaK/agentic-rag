@@ -791,7 +791,18 @@ building unwired infrastructure to fill the slot.
       an empty `query` or missing `user_tier` with a 422 before any
       pipeline work runs. Citations are embedded in the answer text itself
       by `generate_answer()`'s own grounding prompt — no separate
-      citations field. **Security judges deliberately not composed in
+      citations field. **This is a real, acknowledged FR1 gap, not a
+      settled design choice** (self-review caught it): FR1 requires citing
+      "the exact source chunk," but `[1]`-style inline markers aren't
+      resolvable to anything by an API client — `answer_with_cache()`
+      discards the retrieved chunks' `relative_path`/`chunk_index`/
+      `access_tier` once it has produced the answer string, on both the
+      cache-hit and cache-miss paths. Fixing this properly means changing
+      `answer_with_cache()`'s return shape (and `SemanticCache`'s cached-
+      entry shape, so a cache hit can still return the original
+      citations) — shared, already-tested Phase 5 infrastructure, not
+      something to change inline in this PR. Tracked as its own follow-up
+      below rather than silently left unfixed. **Security judges deliberately not composed in
       yet** — this endpoint was sequenced to land only after the
       concurrent judge-hardening/generalization work (below) settled on
       `main`, to avoid building against `injection_judge.py`/
@@ -815,9 +826,48 @@ building unwired infrastructure to fill the slot.
       specifically, which never got a temperature pinned — flagged as its
       own follow-up rather than fixed here (out of this PR's scope; not
       something the API layer introduced or can fix by itself).
+
+      **Self-review found and fixed two real validation gaps**: (1) an
+      unknown `user_tier` (e.g. a typo) reached `answer_with_cache()` →
+      `allowed_tiers_for()` and raised `UnknownAccessTierError` unhandled,
+      surfacing as an opaque 500 instead of telling the caller their tier
+      value was invalid — now caught and returned as a 422 with the
+      original error message. (2) `QueryRequest.query`'s `min_length=1`
+      accepted whitespace-only input (`"   "` satisfies length 1), which
+      would skip straight past validation and trigger a full, wasted
+      retrieval+generation cycle against a real Ollama server for
+      effectively empty input — confirmed live: writing a test for this
+      *without* the fix caused a real, slow Ollama call instead of a fast
+      422, which is exactly the bug. Fixed with a `field_validator` that
+      strips and rejects blank input. Both covered by new regression
+      tests in `tests/api/test_query.py`.
+- [ ] Return structured citations from `POST /query` (FR1) — currently
+      the response is `{"answer": str}` with inline `[1]`-style markers an
+      API client can't resolve to a document. Needs `answer_with_cache()`
+      to return citation metadata (`relative_path`/`chunk_index`/
+      `access_tier` per source) alongside the answer, and `SemanticCache`'s
+      entry shape to store it too so a cache hit doesn't lose it — shared
+      Phase 5 infrastructure, deliberately not touched in the `POST
+      /query` PR itself.
 - [ ] Compose `check_for_injection()` / `check_for_foul_language()` /
       `check_output_security()` into `POST /query` — the "Phase 7's job"
       deferred repeatedly throughout Phase 6.
+- [ ] Reconsider `POST /query`'s sync `def` handler — self-review flagged
+      that the full call chain (`rewrite_query`, `answer_with_cache`) is
+      blocking network I/O (Ollama, Qdrant) with no `async`/`await`
+      anywhere; FastAPI runs sync handlers in Starlette's default
+      threadpool (40 threads), so concurrent requests risk queuing behind
+      that cap even though the workload is I/O-bound, not CPU-bound. Not
+      addressed in the `POST /query` PR — the underlying Ollama/Qdrant
+      client calls throughout `orchestration/`/`retrieval/`/`embedding/`
+      would need to become async too, a larger cross-cutting change.
+- [ ] Reduce `answer_with_cache()`'s 19-parameter signature — self-review
+      noted `POST /query` (its first real caller) hand-marshals 17
+      individual `Settings` fields into keyword arguments at the one call
+      site; a typo'd kwarg name is a silent `TypeError` at request time,
+      not at import time. Consider accepting a config object (or
+      `Settings` itself) instead. Not addressed here — touches
+      already-merged Phase 5 code, not `POST /query`'s to redesign alone.
 - [ ] OpenAPI docs kept accurate
 - [ ] Background sync job for near-real-time index freshness (FR4)
 

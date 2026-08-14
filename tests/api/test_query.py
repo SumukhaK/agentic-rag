@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from agentic_rag.api.app import create_app
 from agentic_rag.config import Settings
 from agentic_rag.orchestration.rewrite import ConversationTurn
+from agentic_rag.retrieval.access import UnknownAccessTierError
 
 
 def _test_settings(tmp_path: Path) -> Settings:
@@ -52,9 +53,7 @@ def test_query_rewrites_history_before_retrieval(tmp_path):
                 },
             )
 
-    args, kwargs = mock_rewrite.call_args
-    history_arg = args[0] if args else kwargs["history"]
-    query_arg = args[1] if len(args) > 1 else kwargs["query"]
+    history_arg, query_arg = mock_rewrite.call_args.args
     assert history_arg == [ConversationTurn("who won the first leg?", "Arsenal, 2-1.")]
     assert query_arg == "and the second leg?"
 
@@ -75,9 +74,7 @@ def test_query_passes_the_rewritten_query_and_user_tier_to_answer_with_cache(tmp
                 json={"query": "and the second leg?", "user_tier": "tier-2", "history": []},
             )
 
-    args, kwargs = mock_answer.call_args
-    query_arg = args[0] if args else kwargs["query"]
-    tier_arg = args[1] if len(args) > 1 else kwargs["user_tier"]
+    query_arg, tier_arg = mock_answer.call_args.args
     assert query_arg == "who won the second leg of the Arsenal tie?"
     assert tier_arg == "tier-2"
 
@@ -87,6 +84,32 @@ def test_query_rejects_an_empty_query(tmp_path):
         response = client.post("/query", json={"query": "", "user_tier": "tier-1", "history": []})
 
     assert response.status_code == 422
+
+
+def test_query_rejects_a_whitespace_only_query(tmp_path):
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/query", json={"query": "   ", "user_tier": "tier-1", "history": []}
+        )
+
+    assert response.status_code == 422
+
+
+def test_query_returns_422_for_an_unknown_user_tier(tmp_path):
+    with _client(tmp_path) as client:
+        with (
+            patch("agentic_rag.api.routers.query.rewrite_query", return_value="who won?"),
+            patch(
+                "agentic_rag.api.routers.query.answer_with_cache",
+                side_effect=UnknownAccessTierError("'admin' is not a known access tier"),
+            ),
+        ):
+            response = client.post(
+                "/query", json={"query": "who won?", "user_tier": "admin", "history": []}
+            )
+
+    assert response.status_code == 422
+    assert "admin" in response.json()["detail"]
 
 
 def test_query_rejects_a_missing_user_tier(tmp_path):
@@ -107,6 +130,5 @@ def test_query_defaults_history_to_empty(tmp_path):
             response = client.post("/query", json={"query": "who won?", "user_tier": "tier-1"})
 
     assert response.status_code == 200
-    args, kwargs = mock_rewrite.call_args
-    history_arg = args[0] if args else kwargs["history"]
+    history_arg, _query_arg = mock_rewrite.call_args.args
     assert history_arg == []

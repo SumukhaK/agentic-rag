@@ -764,7 +764,33 @@ building unwired infrastructure to fill the slot.
 
 ## Phase 7 — API & Delivery
 
-- [ ] FastAPI backend exposing chat/query endpoints
+- [x] FastAPI app scaffold — `create_app(settings)`
+      (`src/agentic_rag/api/app.py`) takes `Settings` explicitly rather than
+      constructing one internally, matching this codebase's established
+      explicit-parameter style and letting tests point the app at an
+      ephemeral `tmp_path` Qdrant/corpus instead of `.env`. `lifespan`
+      creates the Qdrant client, `EmbeddingCache`, and `SemanticCache`
+      **once** and stores them on `app.state`, not per-request — embedded
+      Qdrant (`qdrant_setup.get_client`) is a single-process, on-disk-locked
+      client, and both caches are documented as process-lifetime singletons
+      (their own docstrings), so a fresh one per request would silently
+      defeat caching entirely. `ensure_collection()` runs at startup so a
+      schema mismatch fails fast at boot, not confusingly on the first
+      query. `GET /health` is the only route so far. A follow-up in the
+      same PR removed an unused `httpx2` dev dependency the original commit
+      had added on the mistaken belief `TestClient` needed it — plain
+      `httpx` (already a transitive dep) was sufficient.
+- [ ] `POST /query` — the actual chat/query endpoint (FR1/FR2), stateless
+      (client resends full conversation history each call, per the
+      product decision recorded here): wires `rewrite_query()` →
+      `answer_with_cache()`. **Security judges deliberately not composed in
+      yet** — this endpoint was sequenced to land only after the
+      concurrent judge-hardening/generalization work (below) settled on
+      `main`, to avoid building against `injection_judge.py`/
+      `output_security.py`/`foul_language.py` while they were mid-refactor.
+- [ ] Compose `check_for_injection()` / `check_for_foul_language()` /
+      `check_output_security()` into `POST /query` — the "Phase 7's job"
+      deferred repeatedly throughout Phase 6.
 - [ ] OpenAPI docs kept accurate
 - [ ] Background sync job for near-real-time index freshness (FR4)
 

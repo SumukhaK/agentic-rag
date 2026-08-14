@@ -3,7 +3,7 @@ import pytest
 from agentic_rag.generation.llm_client import GenerationError
 from agentic_rag.orchestration.injection_judge import check_for_injection
 
-KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=30)
+KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=30, temperature=0.0)
 
 # Fixed validation set (REQUIREMENTS.md §12 / PROJECT_TRACKER.md Phase 6
 # Definition of Done): committed here, not just quoted as a prose count in

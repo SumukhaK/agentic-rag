@@ -490,6 +490,16 @@ the reader has no way to detect on their own.
   (first-word-only parsing; explicit `<<<MESSAGE_START>>>`/`<<<MESSAGE_END>>>`
   delimiters with an instruction to treat the contents as data, not
   commands) and covered by regression cases in the fixed validation set.
+  **Deterministic verdicts (PR #31)**: `check_for_injection()` now requires
+  an explicit `temperature` keyword argument (e.g.
+  `Settings.judge_temperature`, default `0.0`), closing the same
+  non-determinism gap first found in `check_output_security()` below (PR
+  #30) — re-verified for this module specifically (not assumed from the
+  sibling fix): the full live suite passed 20/20 across 5 consecutive
+  runs, and the delimiter-confusion exploit prompt produced a
+  byte-for-byte identical judge response across 10 consecutive runs at
+  `temperature=0.0`. See `PROJECT_TRACKER.md`'s Phase 6 log for the full
+  verification detail.
 - **Output/citation validation**: before an answer is returned, its citation
   links and the underlying chunks are checked for security threats or
   malfunction (e.g. a citation pointing to a chunk the user isn't permitted
@@ -506,8 +516,8 @@ the reader has no way to detect on their own.
   known, accepted residual limitation. Also surfaced that `generate()`'s
   lack of temperature control made judge verdicts genuinely
   non-deterministic across identical calls — fixed with a new
-  `Settings.judge_temperature` (default `0.0`), applied here but not yet
-  to `check_for_injection()` (tracked as its own PROJECT_TRACKER.md item).
+  `Settings.judge_temperature` (default `0.0`), applied here and, as of PR
+  #31, to `check_for_injection()` too (see above).
 - **Foul language refusal**: the system refuses to engage with foul/abusive
   language at any stage of the conversation.
 - **Resolved**: the injection judge and output-validation checks are

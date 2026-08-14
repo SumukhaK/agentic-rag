@@ -1,4 +1,5 @@
 import re
+from dataclasses import dataclass
 
 from agentic_rag.generation.llm_client import generate
 from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE, PlanningResult
@@ -14,6 +15,33 @@ Question: {query}
 Answer:"""
 
 _CITATION_RE = re.compile(r"\[(\d+)\]")
+
+
+@dataclass(frozen=True)
+class Citation:
+    """One source `generate_answer()`'s answer text actually cited -
+    FR1's "document + exact chunk" (`docs/REQUIREMENTS.md` §8 rule 1),
+    resolvable by a caller that only has the answer text and its `[N]`
+    markers, not the `PlanningResult` that produced it."""
+
+    number: int
+    relative_path: str
+    chunk_index: int
+    access_tier: str
+
+
+@dataclass(frozen=True)
+class AnswerResult:
+    """`generate_answer()`'s return value: the answer text plus the
+    citations it actually used, so a caller can resolve `[1]` to an actual
+    document instead of just seeing an unexplained bracketed number - the
+    gap self-review of the `POST /query` PR found (`PROJECT_TRACKER.md`'s
+    Phase 7 log): `answer_with_cache()` used to return a bare `str`,
+    discarding every candidate's `relative_path`/`chunk_index`/
+    `access_tier` once the answer was produced."""
+
+    text: str
+    citations: list[Citation]
 
 
 def _deduplicated_candidates(planning_result: PlanningResult) -> list[SearchCandidate]:
@@ -55,6 +83,25 @@ def _is_grounded(answer: str, source_count: int) -> bool:
     return all(1 <= number <= source_count for number in citation_numbers)
 
 
+def _citations_used(answer: str, candidates: list[SearchCandidate]) -> list[Citation]:
+    """Resolve every citation number the answer actually references (not
+    every candidate offered - a candidate the model chose not to cite
+    wasn't evidence for anything in the final text) into a `Citation`, in
+    ascending order. Only called after `_is_grounded()` has already
+    confirmed every number in `answer` is `1..len(candidates)`, so the
+    `candidates[number - 1]` index is always in range here."""
+    numbers = sorted({int(match) for match in _CITATION_RE.findall(answer)})
+    return [
+        Citation(
+            number=number,
+            relative_path=candidates[number - 1].relative_path,
+            chunk_index=candidates[number - 1].chunk_index,
+            access_tier=candidates[number - 1].access_tier,
+        )
+        for number in numbers
+    ]
+
+
 def generate_answer(
     planning_result: PlanningResult,
     *,
@@ -63,8 +110,13 @@ def generate_answer(
     base_url: str,
     timeout: int,
     temperature: float,
-) -> str:
-    """Produce the final grounded answer for `query` from `planning_result`.
+) -> AnswerResult:
+    """Produce the final grounded answer for `query` from `planning_result`,
+    as an `AnswerResult(text, citations)` - not a bare `str`. A bare string
+    was the original return type; self-review of the `POST /query` PR
+    found it left FR1 unsatisfiable for any real API caller, since the
+    `[N]` markers in `text` are meaningless without the source metadata
+    that only existed inside the now-discarded `PlanningResult`.
 
     If retrieval was insufficient, returns `planning_result.message` (the
     canonical fallback from REQUIREMENTS.md §8 rule 2) directly, with no LLM
@@ -103,13 +155,21 @@ def generate_answer(
     same class of bug already fixed for the judges, just discovered later
     because this call sat unexercised by a real caller until Phase 7's
     `POST /query` existed to run it live.
+
+    `citations` lists only the sources `text` actually cites, in ascending
+    order - not every candidate offered to the prompt. A candidate the
+    model had access to but chose not to reference wasn't evidence for
+    anything in the final answer, so reporting it as a citation would
+    misrepresent what the answer is actually grounded in. Empty whenever
+    `text` is the canonical fallback (nothing was answered, so nothing was
+    cited) or retrieval never ran at all.
     """
     if not planning_result.sufficient:
-        return planning_result.message
+        return AnswerResult(text=planning_result.message, citations=[])
 
     candidates = _deduplicated_candidates(planning_result)
     if not candidates:
-        return CANNOT_ANSWER_MESSAGE
+        return AnswerResult(text=CANNOT_ANSWER_MESSAGE, citations=[])
 
     prompt = _PROMPT_TEMPLATE.format(
         fallback_message=CANNOT_ANSWER_MESSAGE,
@@ -119,4 +179,7 @@ def generate_answer(
     answer = generate(
         prompt, model=model, base_url=base_url, timeout=timeout, temperature=temperature
     )
-    return answer if _is_grounded(answer, len(candidates)) else CANNOT_ANSWER_MESSAGE
+    if not _is_grounded(answer, len(candidates)):
+        return AnswerResult(text=CANNOT_ANSWER_MESSAGE, citations=[])
+
+    return AnswerResult(text=answer, citations=_citations_used(answer, candidates))

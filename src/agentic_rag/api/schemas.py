@@ -19,5 +19,13 @@ class QueryRequest(BaseModel):
         return value
 
 
+class CitationModel(BaseModel):
+    number: int
+    relative_path: str
+    chunk_index: int
+    access_tier: str
+
+
 class QueryResponse(BaseModel):
     answer: str
+    citations: list[CitationModel]

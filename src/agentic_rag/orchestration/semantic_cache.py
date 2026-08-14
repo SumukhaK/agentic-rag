@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from qdrant_client import QdrantClient
 
 from agentic_rag.embedding.cache import EmbeddingCache, embed_query_dense
-from agentic_rag.orchestration.answer import generate_answer
+from agentic_rag.orchestration.answer import AnswerResult, generate_answer
 from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE, plan_and_retrieve
 
 
@@ -13,7 +13,7 @@ from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE, plan_and_r
 class _CacheEntry:
     query_embedding: list[float]
     embedding_model: str
-    answer: str
+    answer: AnswerResult
     cached_at: float
 
 
@@ -67,6 +67,14 @@ class SemanticCache:
 
     Same "no persistence across restarts" caveat as `EmbeddingCache`
     (embedding/cache.py), for the same reason - not solved here.
+
+    Stores the full `AnswerResult` (text + citations), not just the answer
+    text - a cache hit used to return a bare string, silently dropping the
+    citations computed when the answer was first generated, so a repeat of
+    a semantically-similar question would lose FR1's per-source citations
+    on every hit even though the original ask had them. Found during
+    self-review of the `POST /query` PR (`PROJECT_TRACKER.md`'s Phase 7
+    log).
     """
 
     def __init__(self) -> None:
@@ -81,10 +89,10 @@ class SemanticCache:
         similarity_threshold: float,
         ttl_seconds: float,
         now: float | None = None,
-    ) -> str | None:
+    ) -> AnswerResult | None:
         current_time = time.time() if now is None else now
         best_similarity = -1.0
-        best_answer: str | None = None
+        best_answer: AnswerResult | None = None
         for entry in self._entries.get(user_tier, []):
             if entry.embedding_model != embedding_model:
                 continue
@@ -103,7 +111,7 @@ class SemanticCache:
         query_embedding: list[float],
         user_tier: str,
         embedding_model: str,
-        answer: str,
+        answer: AnswerResult,
         *,
         now: float | None = None,
     ) -> None:
@@ -139,7 +147,7 @@ def answer_with_cache(
     max_attempts: int,
     similarity_threshold: float,
     ttl_seconds: float,
-) -> str:
+) -> AnswerResult:
     """Answer `query` for `user_tier`, serving a cached answer for a
     semantically-similar past query at the same tier instead of re-running
     retrieval and generation.
@@ -182,6 +190,11 @@ def answer_with_cache(
     `generation_temperature` is threaded straight through to
     `generate_answer()` - see that function's docstring for why it's
     required and a separate setting from the judges' `judge_temperature`.
+
+    Returns the full `AnswerResult` (text + citations) on both the cache-hit
+    and cache-miss paths - see `SemanticCache`'s docstring for why a cache
+    hit specifically needed fixing to keep returning citations rather than
+    just the answer text.
     """
     query_embedding = embed_query_dense(
         query,
@@ -228,7 +241,7 @@ def answer_with_cache(
         temperature=generation_temperature,
     )
 
-    if planning_result.sufficient and CANNOT_ANSWER_MESSAGE not in answer:
+    if planning_result.sufficient and CANNOT_ANSWER_MESSAGE not in answer.text:
         cache.put(query_embedding, user_tier, embedding_model, answer)
 
     return answer

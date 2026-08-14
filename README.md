@@ -279,14 +279,19 @@ Shipped so far (`src/agentic_rag/api/`):
   client resends the full conversation history on every call, a recorded
   product decision, not an assumption. Converts the request's `history`
   into `ConversationTurn`s, calls `rewrite_query()` then
-  `answer_with_cache()`. Citations are embedded directly in the answer
-  text by `generate_answer()`'s own grounding prompt, not returned as a
-  separate field — **a real FR1 gap self-review caught**, not a settled
-  design choice: an API client has no way to resolve an inline `[1]`
-  marker to an actual document, since `answer_with_cache()` discards the
-  retrieved chunks' path/tier metadata once it produces the answer
-  string. Fixing it means changing shared Phase 5 return/cache shapes, so
-  it's tracked as its own follow-up rather than papered over here.
+  `answer_with_cache()`. Returns `citations: [{number, relative_path,
+  chunk_index, access_tier}]` alongside `answer` - resolving FR1's gap:
+  self-review of the original PR found the inline `[1]`-style markers in
+  the answer text weren't resolvable to an actual document by any real API
+  client, since `answer_with_cache()` discarded that metadata once it had
+  the answer string. Fixed in its own follow-up PR:
+  `generate_answer()` now returns `AnswerResult(text, citations)`, and
+  `SemanticCache` carries citations through **both** the cache-hit and
+  cache-miss paths - a cache hit used to return only the bare answer
+  string, silently losing citations on every repeat of a similar question.
+  Live-verified against real retrieval + real Ollama generation: `[1]`
+  correctly resolved to the actual indexed chunk on every grounded
+  response, and correctly came back empty on the canonical fallback.
   **Security judges are not composed in yet** — deliberately
   sequenced to land after the concurrent judge-hardening/generalization
   work merged, rather than building against three files mid-refactor.

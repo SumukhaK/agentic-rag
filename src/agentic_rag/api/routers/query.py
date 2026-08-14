@@ -1,3 +1,5 @@
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, HTTPException
 from qdrant_client import QdrantClient
 
@@ -7,7 +9,7 @@ from agentic_rag.api.dependencies import (
     get_semantic_cache,
     get_settings,
 )
-from agentic_rag.api.schemas import QueryRequest, QueryResponse
+from agentic_rag.api.schemas import CitationModel, QueryRequest, QueryResponse
 from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.orchestration.rewrite import ConversationTurn, rewrite_query
@@ -28,11 +30,10 @@ def query(
     """Answer `payload.query` for `payload.user_tier`, given prior
     conversation turns (FR1/FR2). Stateless: the caller resends the whole
     conversation history every call - see docs/REQUIREMENTS.md §13 for why.
-    Citations are embedded in the answer text by `generate_answer()`'s own
-    grounding prompt, not returned as a separate field - see
-    PROJECT_TRACKER.md's Phase 7 log for the gap this leaves for API
-    clients trying to resolve a citation to an actual document, tracked as
-    a follow-up rather than fixed here.
+    `citations` resolves every `[N]` marker in `answer` to its actual
+    source (`relative_path`/`chunk_index`/`access_tier`) - see
+    `AnswerResult` (`orchestration/answer.py`) for why this is a separate
+    field rather than requiring the caller to parse `answer` itself.
 
     Security judges (`check_for_injection`, `check_for_foul_language`,
     `check_output_security`) are deliberately not composed in yet - see
@@ -79,4 +80,7 @@ def query(
     except UnknownAccessTierError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return QueryResponse(answer=answer)
+    return QueryResponse(
+        answer=answer.text,
+        citations=[CitationModel(**asdict(citation)) for citation in answer.citations],
+    )

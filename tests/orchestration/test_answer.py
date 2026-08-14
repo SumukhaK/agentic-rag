@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from agentic_rag.generation.llm_client import GenerationError
-from agentic_rag.orchestration.answer import generate_answer
+from agentic_rag.orchestration.answer import Citation, generate_answer
 from agentic_rag.orchestration.planning import (
     CANNOT_ANSWER_MESSAGE,
     PlanningResult,
@@ -41,7 +41,8 @@ def test_generate_answer_returns_the_fallback_message_without_calling_generate_w
     with patch("agentic_rag.orchestration.answer.generate") as mock_generate:
         answer = generate_answer(planning_result, query="Who scored?", **KWARGS)
 
-    assert answer == CANNOT_ANSWER_MESSAGE
+    assert answer.text == CANNOT_ANSWER_MESSAGE
+    assert answer.citations == []
     mock_generate.assert_not_called()
 
 
@@ -54,7 +55,10 @@ def test_generate_answer_returns_the_generated_text_when_citations_are_valid(moc
 
     answer = generate_answer(planning_result, query="Who scored?", **KWARGS)
 
-    assert answer == "Arsenal drew 1-1 against Chelsea [1]."
+    assert answer.text == "Arsenal drew 1-1 against Chelsea [1]."
+    assert answer.citations == [
+        Citation(number=1, relative_path="tier-1/a.txt", chunk_index=0, access_tier="tier-1")
+    ]
 
 
 @patch("agentic_rag.orchestration.answer.generate")
@@ -78,7 +82,8 @@ def test_generate_answer_accepts_the_canonical_fallback_verbatim_with_no_citatio
 
     answer = generate_answer(planning_result, query="Who scored?", **KWARGS)
 
-    assert answer == CANNOT_ANSWER_MESSAGE
+    assert answer.text == CANNOT_ANSWER_MESSAGE
+    assert answer.citations == []
 
 
 @patch("agentic_rag.orchestration.answer.generate")
@@ -93,7 +98,8 @@ def test_generate_answer_falls_back_when_the_generated_text_has_no_citation(mock
 
     answer = generate_answer(planning_result, query="Who scored?", **KWARGS)
 
-    assert answer == CANNOT_ANSWER_MESSAGE
+    assert answer.text == CANNOT_ANSWER_MESSAGE
+    assert answer.citations == []
 
 
 @patch("agentic_rag.orchestration.answer.generate")
@@ -107,7 +113,8 @@ def test_generate_answer_falls_back_when_a_citation_number_is_out_of_range(mock_
 
     answer = generate_answer(planning_result, query="Who scored?", **KWARGS)
 
-    assert answer == CANNOT_ANSWER_MESSAGE
+    assert answer.text == CANNOT_ANSWER_MESSAGE
+    assert answer.citations == []
 
 
 @patch("agentic_rag.orchestration.answer.generate")
@@ -167,11 +174,40 @@ def test_generate_answer_labels_distinct_candidates_with_increasing_citation_num
         ]
     )
 
-    generate_answer(planning_result, query="Recap", **KWARGS)
+    answer = generate_answer(planning_result, query="Recap", **KWARGS)
 
     prompt = mock_generate.call_args.args[0]
     assert "[1]" in prompt
     assert "[2]" in prompt
+    assert answer.citations == [
+        Citation(number=1, relative_path="tier-1/a.txt", chunk_index=0, access_tier="tier-1"),
+        Citation(number=2, relative_path="tier-1/a.txt", chunk_index=1, access_tier="tier-1"),
+    ]
+
+
+@patch("agentic_rag.orchestration.answer.generate")
+def test_generate_answer_citations_only_include_numbers_actually_cited(mock_generate):
+    # Two sources are offered but the model's answer only cites the first -
+    # the second was never used as evidence for anything in the final text,
+    # so it shouldn't be reported back as a citation either.
+    mock_generate.return_value = "First chunk [1]."
+    planning_result = _sufficient_result(
+        [
+            RetrievalOutcome(
+                sub_question="Who played?",
+                candidates=[
+                    _candidate(chunk_index=0, text="First chunk."),
+                    _candidate(chunk_index=1, text="Second chunk."),
+                ],
+            )
+        ]
+    )
+
+    answer = generate_answer(planning_result, query="Recap", **KWARGS)
+
+    assert answer.citations == [
+        Citation(number=1, relative_path="tier-1/a.txt", chunk_index=0, access_tier="tier-1")
+    ]
 
 
 @patch("agentic_rag.orchestration.answer.generate")
@@ -186,7 +222,8 @@ def test_generate_answer_returns_the_fallback_without_calling_generate_when_cand
 
     answer = generate_answer(planning_result, query="Who scored?", **KWARGS)
 
-    assert answer == CANNOT_ANSWER_MESSAGE
+    assert answer.text == CANNOT_ANSWER_MESSAGE
+    assert answer.citations == []
     mock_generate.assert_not_called()
 
 

@@ -780,14 +780,41 @@ building unwired infrastructure to fill the slot.
       same PR removed an unused `httpx2` dev dependency the original commit
       had added on the mistaken belief `TestClient` needed it — plain
       `httpx` (already a transitive dep) was sufficient.
-- [ ] `POST /query` — the actual chat/query endpoint (FR1/FR2), stateless
+- [x] `POST /query` — the actual chat/query endpoint (FR1/FR2), stateless
       (client resends full conversation history each call, per the
-      product decision recorded here): wires `rewrite_query()` →
-      `answer_with_cache()`. **Security judges deliberately not composed in
+      product decision recorded here). **Implemented as**
+      `src/agentic_rag/api/routers/query.py`: converts the request's
+      `history` into `ConversationTurn`s, calls `rewrite_query()` then
+      `answer_with_cache()` (both via `Settings` + the lifespan-managed
+      Qdrant client / caches from `app.state`, injected through
+      `Depends`). `QueryRequest`/`QueryResponse` (`api/schemas.py`) reject
+      an empty `query` or missing `user_tier` with a 422 before any
+      pipeline work runs. Citations are embedded in the answer text itself
+      by `generate_answer()`'s own grounding prompt — no separate
+      citations field. **Security judges deliberately not composed in
       yet** — this endpoint was sequenced to land only after the
       concurrent judge-hardening/generalization work (below) settled on
       `main`, to avoid building against `injection_judge.py`/
       `output_security.py`/`foul_language.py` while they were mid-refactor.
+
+      **Live-verified end-to-end against real Ollama + a real embedded
+      Qdrant collection** (indexed one document via `index_document()`,
+      queried through the actual FastAPI app via `TestClient`, not just
+      mocked unit tests): a follow-up question using conversation history
+      correctly resolved via `rewrite_query()` and returned a grounded,
+      cited answer. A same-session repeat call with **no** history and an
+      otherwise-identical, already-proven-sufficient retrieval result
+      intermittently returned the canonical "I do not know" fallback
+      instead — traced (bypassing the API entirely, calling
+      `generate_answer()` directly 3× with the identical `PlanningResult`)
+      to `generate_answer()` itself, not to anything in this endpoint:
+      2 of 3 identical calls answered correctly, 1 fell back, despite
+      `sufficient=True` and the correct chunk retrieved every time. Same
+      root cause class as the Phase 6 judge non-determinism bug
+      (`Settings.judge_temperature`), but for the *final answer* call
+      specifically, which never got a temperature pinned — flagged as its
+      own follow-up rather than fixed here (out of this PR's scope; not
+      something the API layer introduced or can fix by itself).
 - [ ] Compose `check_for_injection()` / `check_for_foul_language()` /
       `check_output_security()` into `POST /query` — the "Phase 7's job"
       deferred repeatedly throughout Phase 6.

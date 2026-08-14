@@ -264,6 +264,38 @@ Shipped (`src/agentic_rag/orchestration/`):
 - None of the three checks are wired into `answer_with_cache` or any
   other caller yet — composition is Phase 7's job.
 
+**Phase 7 — API & Delivery: in progress.**
+
+Shipped so far (`src/agentic_rag/api/`):
+- **FastAPI app scaffold** — `create_app(settings)` takes `Settings`
+  explicitly rather than constructing one internally, so tests can point
+  the app at an ephemeral `tmp_path` Qdrant/corpus instead of `.env`.
+  `lifespan` creates the Qdrant client, `EmbeddingCache`, and
+  `SemanticCache` once and stores them on `app.state` — embedded Qdrant is
+  single-process/on-disk-locked and both caches are process-lifetime
+  singletons by design, so a fresh one per request would defeat caching
+  entirely. `GET /health` is a liveness check.
+- **`POST /query`** — the chat/query endpoint (FR1/FR2). Stateless: the
+  client resends the full conversation history on every call, a recorded
+  product decision, not an assumption. Converts the request's `history`
+  into `ConversationTurn`s, calls `rewrite_query()` then
+  `answer_with_cache()`. Citations are embedded directly in the answer
+  text by `generate_answer()`'s own grounding prompt, not a separate
+  field. **Security judges are not composed in yet** — deliberately
+  sequenced to land after the concurrent judge-hardening/generalization
+  work merged, rather than building against three files mid-refactor.
+- **Live-verified end-to-end**, not just mocked: indexed a real document
+  into a real embedded Qdrant collection, queried it through the actual
+  FastAPI app (`TestClient`, real Ollama calls). A multi-turn follow-up
+  correctly resolved via `rewrite_query()` and returned a grounded, cited
+  answer. Also surfaced a real, pre-existing gap while doing this: calling
+  `generate_answer()` (Phase 5) 3× with the identical, already-sufficient
+  retrieval result answered correctly twice and fell back to "I do not
+  know" once — the same class of non-determinism bug fixed for the Phase
+  6 judges (`Settings.judge_temperature`), but for the final answer call,
+  which never got a temperature pinned. Not this endpoint's bug and not
+  fixed here — flagged as its own follow-up.
+
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.
 

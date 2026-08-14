@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from agentic_rag.api.routers.health import router as health_router
+from agentic_rag.api.routers.query import router as query_router
 from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
@@ -47,4 +48,5 @@ def create_app(settings: Settings) -> FastAPI:
 
     app = FastAPI(title="Agentic RAG", lifespan=lifespan)
     app.include_router(health_router)
+    app.include_router(query_router)
     return app

@@ -594,6 +594,8 @@ Log of decisions made explicitly during planning, for traceability:
 | Semantic cache backend | In-memory, linear cosine similarity | No new infrastructure; mirrors `EmbeddingCache`'s established pattern for a much smaller, more ephemeral dataset than the document corpus |
 | Semantic cache scoping | Per `(query meaning, user_tier)`, not just query meaning | Follows directly from FR3 — a cached answer was generated from tier-filtered retrieval, so a different tier must never receive it |
 | Injection judge / output validation model | Local generation model (`mistral`) | No new `ANTHROPIC_API_KEY` needed; a real tradeoff, not a clean win — full reasoning and the required empirical validation step are in `PROJECT_TRACKER.md`'s Phase 6 log, not duplicated here |
+| API app location | `src/agentic_rag/api/` | Consistent with this repo's established flat `src/agentic_rag/` layout (`ingestion/`, `embedding/`, `retrieval/`, `generation/`, `orchestration/`) — no new top-level packaging concept introduced for the API layer alone |
+| Multi-turn chat session model | Stateless — client resends full history each `POST /query` call | Simplest for the MVP; avoids a new persistence/session-store decision this early, consistent with this project's bias against speculative infrastructure. Revisit if a real chat UI needs server-side session state |
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 

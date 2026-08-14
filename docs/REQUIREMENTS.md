@@ -493,16 +493,28 @@ the reader has no way to detect on their own.
 - **Output/citation validation**: before an answer is returned, its citation
   links and the underlying chunks are checked for security threats or
   malfunction (e.g. a citation pointing to a chunk the user isn't permitted
-  to see, or content indicating a successful injection).
+  to see, or content indicating a successful injection). **Implemented as**
+  `check_output_security()` (`src/agentic_rag/orchestration/output_security.py`)
+  — a deterministic access-tier check (no LLM call) plus an LLM-based check
+  of whether the generated answer itself shows signs of a successful
+  injection, sharing its response parser with `check_for_injection()`. **Not
+  wired into any caller yet** — same status as the injection judge above,
+  for the same reason (composition is Phase 7's job). Empirically validated
+  11/11 against a committed fixture
+  (`tests/orchestration/test_output_security_live.py`); see
+  `PROJECT_TRACKER.md`'s Phase 6 log for the full tuning history and a
+  known, accepted residual limitation. Also surfaced that `generate()`'s
+  lack of temperature control made judge verdicts genuinely
+  non-deterministic across identical calls — fixed with a new
+  `Settings.judge_temperature` (default `0.0`), applied here but not yet
+  to `check_for_injection()` (tracked as its own PROJECT_TRACKER.md item).
 - **Foul language refusal**: the system refuses to engage with foul/abusive
   language at any stage of the conversation.
 - **Resolved**: the injection judge and output-validation checks are
   performed by the **local generation model (`mistral`)**, not Claude — no
   new `ANTHROPIC_API_KEY` needed. See §13's decision log for the full
   tradeoff, including a known `mistral` reliability gap this decision
-  doesn't paper over. The injection judge's empirical check has now run
-  (above); output/citation validation's has not, since that check isn't
-  built yet.
+  doesn't paper over. Both checks' empirical validation has now run (above).
 
 ## 13. Resolved Design Decisions
 

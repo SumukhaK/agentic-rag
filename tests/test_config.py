@@ -254,3 +254,21 @@ def test_settings_semantic_cache_ttl_seconds_overridable_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.semantic_cache_ttl_seconds == 60.0
+
+
+def test_settings_defaults_judge_temperature(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("JUDGE_TEMPERATURE", raising=False)
+
+    settings = Settings()
+
+    assert settings.judge_temperature == 0.0
+
+
+def test_settings_judge_temperature_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("JUDGE_TEMPERATURE", "0.1")
+
+    settings = Settings()
+
+    assert settings.judge_temperature == 0.1

@@ -494,14 +494,102 @@ building unwired infrastructure to fill the slot.
       needs to build from, and it's the regression test that would have
       caught both bugs above if it had existed before they were found by
       hand.
-- [ ] Output/citation security validation (local `mistral`) — distinct
+- [x] Output/citation security validation (local `mistral`) — distinct
       from Phase 5's `_is_grounded()` (which only checks citation numbers
-      are in-range). Checks citations and underlying chunks for security
-      threats or malfunction generally (§12) — a citation pointing outside
-      the user's access tier and content indicating a successful injection
-      are the two known examples, not an exhaustive list. Not done until
-      validated per the decision above
+      are in-range). **Implemented as** `check_output_security()`
+      (`src/agentic_rag/orchestration/output_security.py`), returning
+      `OutputSecurityCheckResult(is_safe, reason, raw_judge_response)`.
+      **Not wired into `generate_answer()`/`answer_with_cache()` or any
+      other caller yet** — same caveat as the injection judge above and
+      for the same reason: composition is a Phase 7 concern, and self-
+      review on this PR caught that the first version of this checklist
+      entry omitted this caveat while the injection judge's had it, an
+      inconsistency worth calling out on its own — a reader skimming only
+      the `[x]` and the 11/11 result could otherwise conclude answers are
+      screened end-to-end today, when none are.
+      Two independent checks, not one:
+      1. **Access-tier leakage**, deterministically — reuses
+         `allowed_tiers_for()` (the same tier-resolution `hybrid_search()`
+         already applies at retrieval time) to flag any candidate whose
+         `access_tier` the user isn't authorized to see. No LLM call at
+         all for this check — it's the last line of defense before an
+         answer reaches the user, so it can't depend on a judge's
+         judgment to catch a retrieval-time filter that already failed.
+      2. **A successful injection reflected in the answer itself**, via
+         the same `classify_injection_verdict()` parser
+         `check_for_injection()` uses (promoted to a shared, public
+         function in `injection_judge.py` specifically for this reuse).
+         Checks the generated *answer*, not whether a source chunk merely
+         *contains* injection-like text — screening chunks for
+         injection-like content at ingestion time is a related, separate
+         concern, not covered here.
+
+      **Prompt tuned through several live rounds against real accuracy
+      problems, not just written once and assumed correct**: the first
+      version flagged ordinary football answers that happened to use
+      words like "injection" or "access" (e.g. "the striker received a
+      cortisone injection"), and separately missed a delimiter-confusion
+      attack embedded directly in the answer text. Both fixed — the
+      current prompt explicitly exempts ordinary footballing/medical use
+      of those words, and wraps the question/answer pair in
+      `<<<START>>>`/`<<<END>>>` delimiters with an instruction to treat
+      the contents as data, not commands (mirroring the same mitigation
+      `check_for_injection()` already uses). **One residual limitation,
+      recorded honestly, not chased further**: an answer densely packing
+      several security-adjacent words into one sentence can still trip a
+      false positive — accepted given a real `generate_answer()` output
+      (grounded, citation-based) is unlikely to produce that phrasing
+      organically, and further prompt tuning showed diminishing,
+      inconsistent returns (fixing one case reliably regressed another).
+
+      **A second real bug found via this feature's own live validation,
+      not specific to output-security**: `generate()` (`llm_client.py`)
+      had no temperature control, so Ollama used its own default
+      (non-zero) sampling temperature — the identical delimiter-confusion
+      exploit prompt passed the live suite on one run and failed on an
+      immediate re-run with zero code changes in between. This isn't just
+      test flakiness: it means the same malicious input could be caught
+      or missed inconsistently in actual production too. Fixed by adding
+      an optional `temperature` parameter to `generate()` (`None` by
+      default, preserving every existing caller's behavior unchanged) and
+      a new `Settings.judge_temperature` (default `0.0`), which
+      `check_output_security()` now requires and passes explicitly.
+      **Empirically re-verified, not just assumed fixed**: the same
+      exploit prompt run 5 times in a row at `temperature=0.0` produced
+      byte-for-byte identical output every time. `check_for_injection()`
+      has the same underlying gap (it predates this fix) and is flagged
+      as its own follow-up task rather than bundled into this PR, per the
+      "each concern gets its own PR" lesson from the secrets-audit PR's
+      self-review.
+
+      **Empirical validation (the Definition-of-Done this item committed
+      to)** is a committed, reproducible fixture, not a prose count:
+      `tests/orchestration/test_output_security_live.py` — 6 safe answers
+      (including the two vocabulary-collision cases and the canonical
+      fallback message) + 4 unsafe answers (including the
+      delimiter-confusion attack) + 1 deterministic out-of-tier case —
+      **11/11 correct** against real Ollama/`mistral`, skipped gracefully
+      if unavailable.
 - [ ] Foul-language refusal
+- [ ] Make `check_for_injection()` deterministic (`temperature`) — the same
+      non-determinism bug fixed for `check_output_security()` above (PR
+      #30) was proven via that PR's live testing to affect
+      `check_for_injection()` too (they share `classify_injection_verdict()`
+      and the same underlying `generate()` call), but the code fix was
+      deliberately left out of that PR per the "each concern gets its own
+      PR" lesson from the secrets-audit PR's self-review — reviewers on PR
+      #30 pushed back that leaving this as PR-description prose with no
+      tracked checklist item risked it being forgotten, especially since
+      `check_for_injection()` (query-side screening) is likely to be wired
+      into a live path before `check_output_security()` (answer-side,
+      brand new) is. This line exists so that concern has a durable home.
+      `generate()`'s optional `temperature` parameter and
+      `Settings.judge_temperature` already exist and don't need to be
+      rebuilt — just threaded through `check_for_injection()` the same way
+      `check_output_security()` already does it, then re-verified live
+      (run the delimiter-confusion exploit prompt from
+      `tests/orchestration/test_injection_judge_live.py` several times in
+      a row at `temperature=0.0`, the way PR #30 did for its own version).
 
 ## Phase 7 — API & Delivery
 

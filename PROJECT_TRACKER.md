@@ -81,10 +81,9 @@ Status legend: `[ ]` not started · `[~]` in progress · `[x]` done and merged
       Ollama server and a real local Qdrant collection.
 - [x] Embedding generation via `nomic-embed-text` (Ollama):
       `embed_texts()` calls Ollama's batch-capable `/api/embed` endpoint
-      (one HTTP round-trip for many chunks), with `embed_text()` as a
-      single-item convenience wrapper. Tested with mocked HTTP (including
-      malformed-response cases) and smoke-tested against the real local
-      Ollama server (`src/agentic_rag/embedding/ollama_client.py`)
+      (one HTTP round-trip for many chunks). Tested with mocked HTTP
+      (including malformed-response cases) and smoke-tested against the
+      real local Ollama server (`src/agentic_rag/embedding/ollama_client.py`)
 - [x] Embedding cache: `EmbeddingCache` + `embed_with_cache()` — in-memory,
       keyed on `(model, text)`, generic over dense and sparse.
       Wired into `index_document()` via a required `embedding_cache` param
@@ -387,7 +386,17 @@ building unwired infrastructure to fill the slot.
       - **Flagged, not fixed** (out of scope for a config-hygiene pass):
         `embed_text()` has zero production callers anywhere in `src/` —
         spawned as a separate task to decide whether it's dead code to
-        remove or a placeholder for an anticipated Phase 7 caller
+        remove or a placeholder for an anticipated Phase 7 caller.
+        **Resolved** (`refactor/remove-unused-embed-text`): confirmed
+        truly dead rather than anticipatory. Phase 7's only plausible use
+        — embedding a single ad-hoc query — already has a purpose-built,
+        cache-aware pattern for exactly that (`embed_query_dense()` in
+        `embedding/cache.py`, "the common 'one query, cache-aware'
+        pattern used by both hybrid search's dense leg and the semantic
+        cache's lookup embedding"), which calls `embed_texts()` directly
+        and bypasses `embed_text()` entirely. Deleted along with its unit
+        test per CLAUDE.md §1's "no speculative abstraction, no unused
+        flexibility"
 - [x] Injection judge / output-validation model decision — resolved as its
       own PR (`docs/injection-judge-model-decision`, unbundled from the
       secrets/config audit PR after self-review there flagged them as two

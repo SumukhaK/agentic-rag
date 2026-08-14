@@ -8,7 +8,7 @@ from agentic_rag.orchestration.injection_judge import (
     check_for_injection,
 )
 
-KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=30)
+KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=30, temperature=0.0)
 
 
 @patch("agentic_rag.orchestration.injection_judge.generate")

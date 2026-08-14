@@ -47,7 +47,9 @@ def classify_injection_verdict(response: str) -> bool:
     return first_word != "CLEAN"
 
 
-def check_for_injection(query: str, *, model: str, base_url: str, timeout: int) -> InjectionCheckResult:
+def check_for_injection(
+    query: str, *, model: str, base_url: str, timeout: int, temperature: float
+) -> InjectionCheckResult:
     """Screen `query` for a prompt injection attempt before it's used in
     retrieval or generation (REQUIREMENTS.md §12).
 
@@ -73,12 +75,28 @@ def check_for_injection(query: str, *, model: str, base_url: str, timeout: int) 
     empty, unparseable, or anything else - is treated as an injection
     rather than silently waved through.
 
+    `temperature` is required (e.g. `Settings.judge_temperature`, default
+    `0.0`), not optional, matching this codebase's "no defaults on
+    config-mirroring parameters" convention - discovered as a real gap
+    while building the sibling `check_output_security()`
+    (`output_security.py`): the identical delimiter-confusion exploit
+    prompt passed this judge's own live suite
+    (`tests/orchestration/test_injection_judge_live.py`) on one run and
+    failed on an immediate re-run with no code change, because Ollama's
+    default (non-zero) sampling temperature made a security-relevant
+    verdict genuinely inconsistent across calls, not just a flaky test.
+    Re-verified for this module specifically, not just assumed to transfer
+    from `check_output_security()`: the same exploit prompt run repeatedly
+    at `temperature=0.0` produced identical verdicts every time.
+
     Raises GenerationError if the LLM call itself fails - that's an
     infrastructure problem, not a judgment call this function should paper
     over by guessing either way.
     """
     prompt = _INJECTION_JUDGE_PROMPT_TEMPLATE.format(query=query)
-    response = generate(prompt, model=model, base_url=base_url, timeout=timeout)
+    response = generate(
+        prompt, model=model, base_url=base_url, timeout=timeout, temperature=temperature
+    )
 
     return InjectionCheckResult(
         is_injection=classify_injection_verdict(response), raw_response=response

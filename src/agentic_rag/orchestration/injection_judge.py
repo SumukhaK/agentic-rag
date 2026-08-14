@@ -41,7 +41,9 @@ def classify_verdict(response: str) -> bool:
     "injection" (e.g. discussing a player's medical injection - a genuine
     football topic) would fail CLOSED on a legitimate query for the wrong
     reason. Both were found and verified live during self-review. Anything
-    other than an unambiguous, leading CLEAN is treated as an injection.
+    other than an unambiguous, leading CLEAN is treated as flagged - the
+    caller decides what "flagged" means (injection, unsafe output, foul
+    language), this parser only judges the verdict word.
     """
     match = _FIRST_WORD_RE.search(response)
     if match is None:

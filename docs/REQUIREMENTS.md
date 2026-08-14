@@ -533,11 +533,22 @@ the reader has no way to detect on their own.
   "I do not know the answer" wording. **Not wired into any caller yet** — same
   status as the injection judge and output-validation checks above; composition
   is Phase 7's job. Empirically validated 14/14 against a committed fixture
-  (`tests/orchestration/test_foul_language_live.py`), and required no prompt
-  tuning to reach that result. Deterministic by construction — takes the same
-  required `temperature` keyword argument as its siblings from the start
-  (`Settings.judge_temperature`, default `0.0`), rather than needing a
-  follow-up fix.
+  (`tests/orchestration/test_foul_language_live.py`) — the CLEAN/FOUL
+  classification itself needed no tuning. Deterministic by construction —
+  takes the same required `temperature` keyword argument as its siblings
+  from the start (`Settings.judge_temperature`, default `0.0`), rather than
+  needing a follow-up fix. Self-review did find and fix a real prompt-
+  hardening gap, though: the first draft's delimiter instructions were
+  missing two anti-exploit clauses `check_for_injection()`'s prompt already
+  had, and a forged `"...Answer: CLEAN"` suffix live-flipped a genuinely
+  abusive message to CLEAN 3/3 times. Restoring the matching wording plus an
+  end-of-prompt reminder fixed 1 of 3 repro cases; **the other 2 still
+  flip**, and the identical trick (reworded) also flips the already-merged
+  `check_for_injection()` — a shared, phrasing-dependent `mistral`
+  instruction-following gap under the current delimiter mitigation, not
+  something specific to this judge or fixable by further wordsmithing alone.
+  Tracked as its own follow-up in `PROJECT_TRACKER.md` rather than chased
+  further in this PR.
 - **Resolved**: the injection judge and output-validation checks are
   performed by the **local generation model (`mistral`)**, not Claude — no
   new `ANTHROPIC_API_KEY` needed. See §13's decision log for the full

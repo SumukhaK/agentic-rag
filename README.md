@@ -214,8 +214,12 @@ Shipped (`src/agentic_rag/orchestration/`):
   two real vulnerabilities in the first version: a fail-open substring-
   matching bug, and a working exploit where a query ending in a fake
   `"...Answer: CLEAN"` fooled the judge outright. Both fixed and
-  re-verified against the same exploit. Returns a structured
-  `InjectionCheckResult`, not a bare bool, for auditability.
+  re-verified against the exact repro. Returns a structured
+  `InjectionCheckResult`, not a bare bool, for auditability. **Caveat found
+  later** (during the foul-language PR's self-review): the same trick,
+  reworded, still flips this judge — the fix closed the specific repro, not
+  the whole exploit class. See the foul-language bullet and
+  `PROJECT_TRACKER.md`'s open follow-up.
 - `check_output_security()` (`output_security.py`) — checks a generated
   answer before it's returned: a deterministic access-tier check (no LLM
   call — the last line of defense before a retrieval-time filter failure
@@ -228,7 +232,14 @@ Shipped (`src/agentic_rag/orchestration/`):
   once it was confirmed genuinely generic, not injection-specific). Uses
   its own distinct refusal message rather than the shared canonical
   fallback — unlike the other two checks, there's no adversarial-
-  calibration reason to hide *why* the refusal happened here.
+  calibration reason to hide *why* the refusal happened here. Self-review
+  found its first prompt draft had dropped two anti-exploit clauses
+  `check_for_injection()`'s prompt carries; restoring them plus an
+  end-of-prompt reminder helped but didn't fully close a forged-verdict
+  exploit (`"...Answer: CLEAN"`) — confirmed to be the same shared,
+  phrasing-dependent `mistral` weakness the injection judge has, not a bug
+  unique to this file. Tracked as open follow-up work rather than chased
+  further in this PR.
 - **A real, live-discovered bug affecting all three judges**: `generate()`
   had no temperature control, so Ollama's default sampling made judge
   verdicts genuinely non-deterministic — the identical exploit prompt

@@ -213,13 +213,8 @@ Shipped (`src/agentic_rag/orchestration/`):
   prompt injection. Self-review live-demonstrated (not just theorized)
   two real vulnerabilities in the first version: a fail-open substring-
   matching bug, and a working exploit where a query ending in a fake
-  `"...Answer: CLEAN"` fooled the judge outright. Both fixed and
-  re-verified against the exact repro. Returns a structured
-  `InjectionCheckResult`, not a bare bool, for auditability. **Caveat found
-  later** (during the foul-language PR's self-review): the same trick,
-  reworded, still flips this judge — the fix closed the specific repro, not
-  the whole exploit class. See the foul-language bullet and
-  `PROJECT_TRACKER.md`'s open follow-up.
+  `"...Answer: CLEAN"` fooled the judge outright. Returns a structured
+  `InjectionCheckResult`, not a bare bool, for auditability.
 - `check_output_security()` (`output_security.py`) — checks a generated
   answer before it's returned: a deterministic access-tier check (no LLM
   call — the last line of defense before a retrieval-time filter failure
@@ -232,14 +227,28 @@ Shipped (`src/agentic_rag/orchestration/`):
   once it was confirmed genuinely generic, not injection-specific). Uses
   its own distinct refusal message rather than the shared canonical
   fallback — unlike the other two checks, there's no adversarial-
-  calibration reason to hide *why* the refusal happened here. Self-review
-  found its first prompt draft had dropped two anti-exploit clauses
-  `check_for_injection()`'s prompt carries; restoring them plus an
-  end-of-prompt reminder helped but didn't fully close a forged-verdict
-  exploit (`"...Answer: CLEAN"`) — confirmed to be the same shared,
-  phrasing-dependent `mistral` weakness the injection judge has, not a bug
-  unique to this file. Tracked as open follow-up work rather than chased
-  further in this PR.
+  calibration reason to hide *why* the refusal happened here.
+- **Forged/pre-filled-verdict exploit, closed with a deterministic gate,
+  not another prompt-wording round**: self-review of the foul-language PR
+  found a message ending in a forged `"...Answer: CLEAN"` suffix could
+  still flip a genuinely flagged message to CLEAN across all three
+  judges, and that this survived two rounds of prompt-only hardening
+  (delimiters, anti-exploit reminders, few-shot examples) — the common
+  thread was a literal `"Answer: CLEAN"` suffix colliding with the
+  judges' own `"Answer:"` completion cue, a `mistral` pattern-completion
+  bias wordsmithing alone couldn't reliably override. Two candidate
+  fixes were live-tested and rejected (an unguessable per-call challenge
+  token — `mistral` doesn't reliably echo it, causing ~80% false
+  positives on clean messages; and a uniform few-shot approach — worked
+  for foul-language, 21/21, but regressed a genuine injection prompt).
+  **What worked**: `has_forged_verdict()` (`judge.py`) — a deterministic
+  regex gate, shared by all three judges, run *before* the LLM call. It
+  matches the structural signature every forged-verdict variant shares (a
+  verdict-label word near the literal word "clean") regardless of exact
+  phrasing, with zero false positives against a broad set of genuine
+  football content in live testing. See `PROJECT_TRACKER.md`'s completed
+  entry for the full comparison and `docs/REQUIREMENTS.md` §12 for the
+  resolved-decision summary.
 - **A real, live-discovered bug affecting all three judges**: `generate()`
   had no temperature control, so Ollama's default sampling made judge
   verdicts genuinely non-deterministic — the identical exploit prompt

@@ -549,6 +549,29 @@ the reader has no way to detect on their own.
   something specific to this judge or fixable by further wordsmithing alone.
   Tracked as its own follow-up in `PROJECT_TRACKER.md` rather than chased
   further in this PR.
+- **Resolved**: the forged/pre-filled-verdict exploit above (and the
+  matching gap in `check_for_injection()`) is now closed by
+  `has_forged_verdict()` (`src/agentic_rag/orchestration/judge.py`) — a
+  deterministic regex gate, no LLM call, run before every judge's prompt.
+  It detects the structural signature shared by every forged-verdict
+  variant tested (a verdict-label word like "answer," "verdict," "status,"
+  or "classification" in close proximity to the literal word "clean") and
+  flags unconditionally, since a regex can't be talked out of its answer
+  the way `mistral`'s instruction-following could be defeated by a
+  well-placed suffix. Two other candidate directions (an unguessable
+  per-call challenge token; few-shot examples applied uniformly to all
+  three judges) were live-tested and found insufficient — see
+  `PROJECT_TRACKER.md`'s completed entry for the full comparison,
+  including why the injection judge specifically needed a different
+  approach than the foul-language judge. All three judges (this one,
+  `check_for_injection()`, `check_output_security()`) now run the gate
+  first and the hardened prompt second, as defense-in-depth for exploit
+  phrasings that don't match the regex's structural signature.
+  Empirically verified: 16 new regression cases (7 foul-language, 7
+  injection, 2 output-security, split between the original repro strings
+  and a differently-worded holdout set) all pass, with zero false
+  positives against a broad set of genuine football content mentioning
+  "result," "status," or "clean" in unrelated contexts.
 - **Resolved**: the injection judge and output-validation checks are
   performed by the **local generation model (`mistral`)**, not Claude — no
   new `ANTHROPIC_API_KEY` needed. See §13's decision log for the full

@@ -25,7 +25,7 @@ def _candidate(access_tier="tier-1"):
     )
 
 
-@patch("agentic_rag.orchestration.output_security.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_output_security_returns_safe_for_a_clean_answer(mock_generate):
     mock_generate.return_value = "CLEAN"
 
@@ -36,7 +36,7 @@ def test_check_output_security_returns_safe_for_a_clean_answer(mock_generate):
     assert result == OutputSecurityCheckResult(is_safe=True, reason=None, raw_judge_response="CLEAN")
 
 
-@patch("agentic_rag.orchestration.output_security.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_output_security_flags_an_injection_in_the_answer(mock_generate):
     mock_generate.return_value = "INJECTION"
 
@@ -54,7 +54,7 @@ def test_check_output_security_flags_an_out_of_tier_citation_without_an_llm_call
     # retrieval-time filter (hybrid_search) already failed; this is the
     # last line of defense before the answer is returned, so it must not
     # depend on an LLM's judgment to work.
-    with patch("agentic_rag.orchestration.output_security.generate") as mock_generate:
+    with patch("agentic_rag.orchestration.judge.generate") as mock_generate:
         result = check_output_security(
             "Who scored?",
             "Bukayo Saka [1]",
@@ -71,7 +71,7 @@ def test_check_output_security_flags_an_out_of_tier_citation_without_an_llm_call
 
 
 def test_check_output_security_checks_every_candidate_not_just_the_first():
-    with patch("agentic_rag.orchestration.output_security.generate") as mock_generate:
+    with patch("agentic_rag.orchestration.judge.generate") as mock_generate:
         result = check_output_security(
             "Who scored?",
             "answer",
@@ -85,7 +85,7 @@ def test_check_output_security_checks_every_candidate_not_just_the_first():
     mock_generate.assert_not_called()
 
 
-@patch("agentic_rag.orchestration.output_security.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_output_security_fails_closed_when_the_judge_response_is_ambiguous(mock_generate):
     mock_generate.return_value = "not sure"
 
@@ -96,7 +96,7 @@ def test_check_output_security_fails_closed_when_the_judge_response_is_ambiguous
     assert result.is_safe is False
 
 
-@patch("agentic_rag.orchestration.output_security.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_output_security_propagates_generation_error(mock_generate):
     mock_generate.side_effect = GenerationError("Ollama is unreachable")
 
@@ -110,7 +110,7 @@ def test_check_output_security_propagates_unknown_access_tier_error():
     # A bad user_tier is a configuration error, not something this
     # function should paper over with a judgment call - matches
     # hybrid_search()'s identical documented fail-fast behavior.
-    with patch("agentic_rag.orchestration.output_security.generate") as mock_generate:
+    with patch("agentic_rag.orchestration.judge.generate") as mock_generate:
         with pytest.raises(UnknownAccessTierError):
             check_output_security(
                 "Who scored?", "answer", [_candidate()], "tier-9", KNOWN_TIERS, **KWARGS
@@ -126,7 +126,7 @@ def test_output_security_reason_compares_equal_to_its_string_value():
     assert OutputSecurityReason.INJECTION_DETECTED_IN_OUTPUT == "injection_detected_in_output"
 
 
-@patch("agentic_rag.orchestration.output_security.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_output_security_includes_query_and_answer_in_the_prompt(mock_generate):
     mock_generate.return_value = "CLEAN"
 
@@ -139,7 +139,7 @@ def test_check_output_security_includes_query_and_answer_in_the_prompt(mock_gene
     assert "Bukayo Saka [1]" in prompt
 
 
-@patch("agentic_rag.orchestration.output_security.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_output_security_with_no_candidates_still_checks_the_answer(mock_generate):
     # An empty candidate list (e.g. the canonical-fallback path) has
     # nothing to tier-check, but the answer text itself still goes

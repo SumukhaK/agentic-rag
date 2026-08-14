@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
-from agentic_rag.generation.llm_client import generate
-from agentic_rag.orchestration.injection_judge import classify_verdict
+from agentic_rag.orchestration.judge import run_judge
 
 FOUL_LANGUAGE_REFUSAL_MESSAGE = (
     "I'm not able to help with messages that contain offensive or abusive "
@@ -48,19 +47,19 @@ def check_for_foul_language(
     abusive language would be confusing, unhelpful UX that doesn't match
     what actually happened.
 
-    Reuses `classify_verdict()` (`injection_judge.py`) - genuinely
-    generic despite living in that module, and already shared by
-    `check_output_security()`. Same fail-closed behavior: a response
-    whose first word isn't unambiguously CLEAN is treated as foul
-    language, not silently waved through.
+    Reuses `run_judge()` (`judge.py`) - the same call-and-classify
+    skeleton `check_for_injection()` and `check_output_security()` use.
+    Same fail-closed behavior: a response whose first word isn't
+    unambiguously CLEAN is treated as foul language, not silently waved
+    through.
 
     Raises GenerationError if the LLM call itself fails - an
     infrastructure problem, not a judgment call this function should
     paper over by guessing either way.
     """
     prompt = _FOUL_LANGUAGE_PROMPT_TEMPLATE.format(text=text)
-    response = generate(
+    is_foul, response = run_judge(
         prompt, model=model, base_url=base_url, timeout=timeout, temperature=temperature
     )
 
-    return FoulLanguageCheckResult(is_foul=classify_verdict(response), raw_judge_response=response)
+    return FoulLanguageCheckResult(is_foul=is_foul, raw_judge_response=response)

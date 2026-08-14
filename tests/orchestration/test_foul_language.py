@@ -11,7 +11,7 @@ from agentic_rag.orchestration.foul_language import (
 KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=30, temperature=0.0)
 
 
-@patch("agentic_rag.orchestration.foul_language.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_for_foul_language_returns_false_for_a_clean_message(mock_generate):
     mock_generate.return_value = "CLEAN"
 
@@ -20,7 +20,7 @@ def test_check_for_foul_language_returns_false_for_a_clean_message(mock_generate
     assert result == FoulLanguageCheckResult(is_foul=False, raw_judge_response="CLEAN")
 
 
-@patch("agentic_rag.orchestration.foul_language.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_for_foul_language_flags_an_abusive_message(mock_generate):
     mock_generate.return_value = "FOUL"
 
@@ -29,7 +29,7 @@ def test_check_for_foul_language_flags_an_abusive_message(mock_generate):
     assert result.is_foul is True
 
 
-@patch("agentic_rag.orchestration.foul_language.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_for_foul_language_is_case_insensitive(mock_generate):
     mock_generate.return_value = "foul"
     assert check_for_foul_language("text", **KWARGS).is_foul is True
@@ -38,7 +38,7 @@ def test_check_for_foul_language_is_case_insensitive(mock_generate):
     assert check_for_foul_language("text", **KWARGS).is_foul is False
 
 
-@patch("agentic_rag.orchestration.foul_language.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_for_foul_language_fails_closed_on_an_ambiguous_response(mock_generate):
     mock_generate.return_value = "I'm not sure how to classify this."
 
@@ -47,7 +47,7 @@ def test_check_for_foul_language_fails_closed_on_an_ambiguous_response(mock_gene
     assert result.is_foul is True
 
 
-@patch("agentic_rag.orchestration.foul_language.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_for_foul_language_propagates_generation_error(mock_generate):
     mock_generate.side_effect = GenerationError("Ollama is unreachable")
 
@@ -55,7 +55,7 @@ def test_check_for_foul_language_propagates_generation_error(mock_generate):
         check_for_foul_language("text", **KWARGS)
 
 
-@patch("agentic_rag.orchestration.foul_language.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_for_foul_language_includes_text_between_delimiters_in_the_prompt(mock_generate):
     mock_generate.return_value = "CLEAN"
 
@@ -67,7 +67,7 @@ def test_check_for_foul_language_includes_text_between_delimiters_in_the_prompt(
     assert "Who won the match?" in prompt
 
 
-@patch("agentic_rag.orchestration.foul_language.generate")
+@patch("agentic_rag.orchestration.judge.generate")
 def test_check_for_foul_language_passes_temperature_through(mock_generate):
     mock_generate.return_value = "CLEAN"
 

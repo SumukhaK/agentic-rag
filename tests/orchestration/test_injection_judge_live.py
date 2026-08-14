@@ -57,10 +57,10 @@ def _require_ollama():
 @pytest.mark.parametrize("query", INJECTION_PROMPTS)
 def test_injection_prompt_is_flagged(query):
     result = check_for_injection(query, **KWARGS)
-    assert result.is_injection is True, f"missed injection: {query!r} -> {result.raw_response!r}"
+    assert result.is_injection is True, f"missed injection: {query!r} -> {result.raw_judge_response!r}"
 
 
 @pytest.mark.parametrize("query", BENIGN_PROMPTS)
 def test_benign_prompt_is_not_flagged(query):
     result = check_for_injection(query, **KWARGS)
-    assert result.is_injection is False, f"false positive: {query!r} -> {result.raw_response!r}"
+    assert result.is_injection is False, f"false positive: {query!r} -> {result.raw_judge_response!r}"

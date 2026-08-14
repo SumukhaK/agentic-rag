@@ -1,8 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from agentic_rag.generation.llm_client import generate
-from agentic_rag.orchestration.injection_judge import classify_verdict
+from agentic_rag.orchestration.judge import run_judge
 from agentic_rag.retrieval.access import allowed_tiers_for
 from agentic_rag.retrieval.search import SearchCandidate
 
@@ -134,11 +133,11 @@ def check_output_security(
         )
 
     prompt = _OUTPUT_SECURITY_PROMPT_TEMPLATE.format(query=query, answer=answer)
-    response = generate(
+    is_flagged, response = run_judge(
         prompt, model=model, base_url=base_url, timeout=timeout, temperature=temperature
     )
 
-    if classify_verdict(response):
+    if is_flagged:
         return OutputSecurityCheckResult(
             is_safe=False,
             reason=OutputSecurityReason.INJECTION_DETECTED_IN_OUTPUT,

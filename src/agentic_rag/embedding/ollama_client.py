@@ -29,8 +29,3 @@ def embed_texts(
         raise EmbeddingError(f"unexpected response from Ollama: {exc}") from exc
     except requests.RequestException as exc:
         raise EmbeddingError(f"failed to reach Ollama: {exc}") from exc
-
-
-def embed_text(text: str, model: str, base_url: str, timeout: int) -> list[float]:
-    """Embed a single text. A thin convenience wrapper over embed_texts()."""
-    return embed_texts([text], model, base_url, timeout)[0]

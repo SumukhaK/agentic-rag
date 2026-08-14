@@ -3,11 +3,7 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
-from agentic_rag.embedding.ollama_client import (
-    EmbeddingError,
-    embed_text,
-    embed_texts,
-)
+from agentic_rag.embedding.ollama_client import EmbeddingError, embed_texts
 
 
 def _mock_response(status_code=200, body=None, json_side_effect=None):
@@ -136,17 +132,3 @@ def test_embed_texts_reports_a_non_json_body_as_an_unexpected_response_not_unrea
             base_url="http://localhost:11434",
             timeout=30,
         )
-
-
-@patch("agentic_rag.embedding.ollama_client.requests.post")
-def test_embed_text_returns_a_single_embedding_vector(mock_post):
-    mock_post.return_value = _mock_response(body={"embeddings": [[0.1, 0.2, 0.3]]})
-
-    result = embed_text(
-        "Arsenal drew 1-1.",
-        model="nomic-embed-text",
-        base_url="http://localhost:11434",
-        timeout=30,
-    )
-
-    assert result == [0.1, 0.2, 0.3]

@@ -1201,7 +1201,93 @@ building unwired infrastructure to fill the slot.
       Full suite after fixes: 346 passed, 0 skipped, 0 failures (Ollama
       recovered during this task, so every previously-skipped live
       fixture ran too).
-- [ ] Background sync job for near-real-time index freshness (FR4)
+- [x] Background sync job for near-real-time index freshness (FR4) — own
+      PR, `feat/background-sync-job`. `sync_folder()` (`ingestion/sync.py`)
+      already detected what changed on disk since Phase 1, but its own
+      docstring flagged that propagating those changes to the index and
+      running on a schedule were "a scheduling concern for later
+      (Phase 7)" - this is that concern.
+
+      **Design decision raised to the user first, per `docs/REQUIREMENTS.md`'s
+      own explicit flag**: `EmbeddingCache`'s Phase 2 notes stated "one
+      cache per sync cycle vs. one for the process lifetime... needs a
+      decision when Phase 7 is designed, not an assumption baked in
+      here." Presented both options with their tradeoffs; the user chose
+      **fresh cache per cycle** - bounds memory at target scale
+      (10,000+ docs) rather than risk unbounded growth over days/weeks of
+      uptime, accepting that the only real cost is losing reuse of
+      identical chunk text across documents that happen to change in
+      *different* cycles (narrower than it sounds, since `sync_folder()`'s
+      diffing already skips re-embedding anything unchanged regardless of
+      cache lifetime).
+
+      **New module** `ingestion/scheduler.py`:
+      - `run_sync_cycle()` - the synchronous composition step: calls
+        `sync_folder()`, then `index_document()`/`delete_document()`
+        (`indexing/upsert.py`) for what it returns. Takes `settings:
+        Settings` directly rather than a dozen individual keyword
+        arguments - applying, not just noting, the lesson self-review
+        already flagged for `answer_with_cache()`'s 19-parameter
+        signature earlier in this phase's log (a config-object parameter
+        instead of hand-marshalled kwargs at every call site). A document
+        or deletion that fails at the indexing step (embedding error,
+        Qdrant error) is caught and reported in the result rather than
+        aborting the cycle - the same per-file isolation
+        `sync_folder()`/`process_changes()` already apply to ingestion
+        failures (`docs/REQUIREMENTS.md` §11), now extended to the
+        indexing step this function adds.
+      - `run_sync_loop()` - the async scheduling wrapper: runs
+        `run_sync_cycle()` on `Settings.sync_interval_seconds` (new
+        setting, default 60s) until cancelled, threading each cycle's
+        returned snapshot into the next one's `previous_snapshot`. Each
+        cycle's blocking work runs via `asyncio.to_thread()` so it
+        doesn't block the event loop `POST /query` shares with it in the
+        *same* process - Qdrant's embedded/on-disk-locked mode
+        (`docs/REQUIREMENTS.md` §9) rules out a separate worker process
+        without lock contention. A whole cycle raising (rare - every
+        per-document/deletion failure is already isolated inside the
+        cycle itself) is caught and logged rather than killing the loop,
+        the same "one bad thing can't stall everything else" reasoning
+        applied one level up.
+
+      **Wired into `api/app.py`'s `lifespan`**: started as an
+      `asyncio.Task` alongside the existing Qdrant client/caches,
+      cancelled and awaited in the same `finally` block `client.close()`
+      already lived in - shutdown doesn't return until the sync task has
+      actually stopped, not just been asked to.
+
+      **A known, explicitly-flagged limitation, not a silent gap**: the
+      snapshot isn't persisted to disk between process restarts, so a
+      restart re-walks and re-indexes the whole corpus rather than
+      resuming incrementally. That's wasteful, not wrong -
+      `index_document()`'s point IDs are deterministic, so re-indexing an
+      unchanged document re-writes the same points, not duplicates - and
+      is accepted for this phase rather than solved with on-disk
+      persistence, the same "not solved yet, flagged rather than
+      silently deferred" precedent `EmbeddingCache` itself already set.
+
+      **On "deletions reflected immediately" (§2/FR4)**: read as
+      "propagation is immediate once a cycle detects it" (a plain Qdrant
+      delete needs no embedding, unlike an edit) rather than "detection
+      is instant" - both edits and deletions are detected at the same
+      `sync_interval_seconds` polling cadence, since `sync_folder()`
+      diffs both in one pass. No stricter interpretation is stated
+      anywhere in `docs/REQUIREMENTS.md`.
+
+      No `pytest-asyncio` dependency added for testing `run_sync_loop()` -
+      each test wraps its coroutine body in `asyncio.run()` from a plain
+      sync test function, matching this codebase's stdlib-first
+      preference throughout this session (`ThreadPoolExecutor` over any
+      async library, `tomllib` over a third-party TOML parser,
+      `importlib.metadata` over a hand-maintained version string).
+
+      15 new tests (`tests/ingestion/test_scheduler.py`,
+      `tests/api/test_app.py`). **Live-verified end-to-end**, not just
+      mocked: real FastAPI app lifecycle, real Ollama embedding, real
+      embedded Qdrant, `sync_interval_seconds=1.0` - a new file was
+      indexed within the first cycle, an edit to it was reflected in the
+      next cycle, and deleting it removed the indexed points in the cycle
+      after that. Full suite: 361 passed, 0 failures.
 
 ## Phase 8 — Evaluation, Observability & Production Readiness
 

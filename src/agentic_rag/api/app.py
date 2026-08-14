@@ -1,5 +1,6 @@
+import asyncio
 import importlib.metadata
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
@@ -9,6 +10,7 @@ from agentic_rag.api.routers.query import router as query_router
 from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
+from agentic_rag.ingestion.scheduler import run_sync_loop
 from agentic_rag.orchestration.semantic_cache import SemanticCache
 
 
@@ -31,6 +33,14 @@ def create_app(settings: Settings) -> FastAPI:
     the whole point of caching. `ensure_collection` runs at startup so a
     schema mismatch fails fast when the app boots, not confusingly on the
     first query.
+
+    `lifespan` also starts `run_sync_loop()` (`ingestion/scheduler.py`,
+    FR4) as a background `asyncio.Task`, sharing this process rather than
+    running as a separate worker - the same single-process, on-disk-locked
+    Qdrant constraint above rules out a separate sync process entirely.
+    Cancelled and awaited in `finally`, the same place `client.close()`
+    already lives, so shutdown doesn't return until the in-flight sync
+    cycle (if any) has actually stopped, not just been asked to.
     """
 
     @asynccontextmanager
@@ -43,9 +53,14 @@ def create_app(settings: Settings) -> FastAPI:
         app.state.qdrant_client = client
         app.state.embedding_cache = EmbeddingCache()
         app.state.semantic_cache = SemanticCache()
+        sync_task = asyncio.create_task(run_sync_loop(settings=settings, client=client))
+        app.state.sync_task = sync_task
         try:
             yield
         finally:
+            sync_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await sync_task
             client.close()
 
     app = FastAPI(

@@ -419,6 +419,22 @@ Shipped so far (`src/agentic_rag/api/`):
   public 422 description no longer leaks internal implementation
   narration into the schema API consumers see. Full suite after fixes:
   346 passed, 0 skipped, 0 failures.
+- **Background sync job (FR4)** — `sync_folder()` (Phase 1) already
+  detected changes on disk; new `ingestion/scheduler.py` propagates them
+  to the index on a schedule. `run_sync_cycle()` composes `sync_folder()`
+  with `index_document()`/`delete_document()`, isolating a failure in any
+  one document or deletion the same way ingestion failures already were.
+  `run_sync_loop()` runs it every `Settings.sync_interval_seconds`
+  (60s default) as an `asyncio.Task` inside `api/app.py`'s `lifespan` —
+  same process, not a separate worker, since Qdrant's embedded/on-disk
+  mode is single-process and locked. Raised to the user first (per
+  `docs/REQUIREMENTS.md`'s own explicit flag): a fresh `EmbeddingCache`
+  per cycle, not one for the process lifetime, to bound memory at target
+  scale rather than risk unbounded growth. 15 new tests, and
+  **live-verified end-to-end** with a 1s interval against real Ollama and
+  real embedded Qdrant — a new file was indexed within one cycle, an edit
+  reflected in the next, a deletion removed in the cycle after. Full
+  suite: 361 passed, 0 failures.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

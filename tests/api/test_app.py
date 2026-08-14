@@ -1,3 +1,4 @@
+import asyncio
 import tomllib
 from pathlib import Path
 
@@ -114,3 +115,26 @@ def test_health_response_schema_reflects_the_actual_fixed_body(tmp_path):
 
     assert health_schema["required"] == ["status"]
     assert "additionalProperties" not in health_schema
+
+
+def test_lifespan_starts_a_background_sync_task(tmp_path):
+    app = create_app(_test_settings(tmp_path))
+
+    with TestClient(app):
+        assert isinstance(app.state.sync_task, asyncio.Task)
+        assert not app.state.sync_task.done()
+
+
+def test_lifespan_cancels_the_sync_task_on_shutdown(tmp_path):
+    app = create_app(_test_settings(tmp_path))
+
+    with TestClient(app):
+        sync_task = app.state.sync_task
+
+    # Shutdown doesn't complete until the sync task has actually stopped,
+    # not just been asked to (app.py's lifespan awaits it in `finally`,
+    # after cancel() - the same place client.close() already lived) - so
+    # by the time the TestClient context has exited, this must already be
+    # true, not just eventually true.
+    assert sync_task.done()
+    assert sync_task.cancelled()

@@ -108,6 +108,18 @@ def query(
     open item, not yet specified anywhere in docs/REQUIREMENTS.md. An
     unknown `user_tier` (`UnknownAccessTierError`) *is* caught, since it's
     a client input error, not an infrastructure failure - returned as 422.
+    Both `answer_with_cache()` and `check_output_security()` can raise it
+    (each calls `allowed_tiers_for()` independently), so both run inside
+    the same `try` - a tier valid enough for `known_tiers` to have changed
+    since a matching answer was cached could otherwise reach
+    `check_output_security()` unvalidated on a cache hit and raise there,
+    uncaught.
+
+    `check_output_security()` is skipped entirely when `answer.text` is
+    the canonical fallback - `generate_answer()` never attaches citations
+    to it, so there is nothing to tier-check, and it's a fixed, known-safe
+    string that can't "reflect a successful injection" - calling the judge
+    on it would be a pure wasted LLM round-trip.
     """
     refusal = _screen_input(payload.query, settings=settings)
     if refusal is not None:
@@ -148,20 +160,24 @@ def query(
             similarity_threshold=settings.semantic_cache_similarity_threshold,
             ttl_seconds=settings.semantic_cache_ttl_seconds,
         )
+
+        if answer.text == CANNOT_ANSWER_MESSAGE:
+            return QueryResponse(answer=CANNOT_ANSWER_MESSAGE, citations=[])
+
+        security_result = check_output_security(
+            rewritten_query,
+            answer.text,
+            [citation.access_tier for citation in answer.citations],
+            payload.user_tier,
+            settings.access_tiers,
+            model=settings.generation_model,
+            base_url=settings.ollama_base_url,
+            timeout=settings.generation_timeout_seconds,
+            temperature=settings.judge_temperature,
+        )
     except UnknownAccessTierError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    security_result = check_output_security(
-        rewritten_query,
-        answer.text,
-        [citation.access_tier for citation in answer.citations],
-        payload.user_tier,
-        settings.access_tiers,
-        model=settings.generation_model,
-        base_url=settings.ollama_base_url,
-        timeout=settings.generation_timeout_seconds,
-        temperature=settings.judge_temperature,
-    )
     if not security_result.is_safe:
         return QueryResponse(answer=CANNOT_ANSWER_MESSAGE, citations=[])
 

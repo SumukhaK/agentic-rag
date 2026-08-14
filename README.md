@@ -307,7 +307,15 @@ Shipped so far (`src/agentic_rag/api/`):
   smaller citation-metadata type) - traced to the function only ever
   reading `.access_tier`, so simplified the parameter to
   `cited_access_tiers: list[str]`, dropping `output_security.py`'s
-  dependency on `retrieval.search` entirely.
+  dependency on `retrieval.search` entirely. **Self-review found and
+  fixed two more real bugs**: `check_output_security()` sat outside the
+  route's `try/except UnknownAccessTierError` block despite independently
+  being able to raise it (a cache hit skips `answer_with_cache()`'s own
+  tier validation entirely), and it ran unconditionally even on the fixed,
+  citation-less canonical fallback answer — a pure wasted LLM call. Both
+  fixed; two other findings claiming CLAUDE.md violations turned out not
+  to exist in this repo's actual `.claude/CLAUDE.md` when checked directly
+  and were refuted.
 - **Live-verified end-to-end**, not just mocked: indexed a real document
   into a real embedded Qdrant collection, queried it through the actual
   FastAPI app (`TestClient`, real Ollama calls). A multi-turn follow-up

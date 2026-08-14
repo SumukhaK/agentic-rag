@@ -227,6 +227,41 @@ def test_query_still_answers_normally_when_both_input_checks_are_clean(tmp_path,
     assert response.json()["answer"] == "the answer"
 
 
+def test_query_returns_422_for_an_unknown_user_tier_raised_by_output_security(tmp_path, mocks):
+    # check_output_security() calls allowed_tiers_for() internally too, so
+    # a bad user_tier that slips past answer_with_cache() (e.g. a cache
+    # hit populated before known_tiers changed) must still surface as a
+    # 422, not an unhandled 500 - the docstring's "an unknown user_tier is
+    # caught" claim has to hold for every call site that can raise it, not
+    # just the first one.
+    mocks["security"].side_effect = UnknownAccessTierError("'admin' is not a known access tier")
+
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/query", json={"query": "who won?", "user_tier": "admin", "history": []}
+        )
+
+    assert response.status_code == 422
+    assert "admin" in response.json()["detail"]
+
+
+def test_query_skips_output_security_for_the_canonical_fallback_answer(tmp_path, mocks):
+    # The fallback is a fixed, known-safe string with no citations ever
+    # attached to it (generate_answer() never returns citations alongside
+    # it) - there is nothing for check_output_security() to check, so
+    # calling it would be a pure wasted LLM round-trip.
+    mocks["answer"].return_value = AnswerResult(text=CANNOT_ANSWER_MESSAGE, citations=[])
+
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/query", json={"query": "who won?", "user_tier": "tier-1", "history": []}
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"answer": CANNOT_ANSWER_MESSAGE, "citations": []}
+    mocks["security"].assert_not_called()
+
+
 def test_query_returns_the_canonical_fallback_when_output_security_flags_the_answer(tmp_path, mocks):
     # is_safe=False must never leak *why* via a security-specific message -
     # the same canonical fallback as an ordinary insufficient-evidence

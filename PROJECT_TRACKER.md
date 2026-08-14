@@ -955,6 +955,32 @@ building unwired infrastructure to fill the slot.
       via its existing `_require_ollama`-style fixture rather than
       failing. Documented honestly rather than silently claimed as
       verified - retry once Ollama recovers.
+
+      **Self-review found and fixed two real issues**: (1)
+      `check_output_security()` sat outside the `try/except
+      UnknownAccessTierError` block even though it independently calls
+      `allowed_tiers_for()` and can raise the same exception —
+      `answer_with_cache()`'s cache-hit path (`SemanticCache.get()`)
+      returns early without ever calling `allowed_tiers_for()`, so a tier
+      valid when a matching answer was cached, then later removed from
+      `Settings.access_tiers`, would skip validation on a cache hit and
+      reach `check_output_security()` unvalidated — raising there,
+      uncaught, an unhandled 500 instead of the documented 422. Both
+      calls now share one `try` block. (2) `check_output_security()` ran
+      unconditionally even for the canonical fallback answer, which
+      `generate_answer()` never attaches citations to and which is a
+      fixed, known-safe string — a pure wasted LLM round-trip on every
+      retrieval-insufficient query. Now skipped entirely when
+      `answer.text == CANNOT_ANSWER_MESSAGE`. Both covered by new
+      regression tests in `tests/api/test_query.py`.
+
+      Two review findings claiming CLAUDE.md violations ("max 40-line
+      functions," "routes must be thin, business logic in service
+      classes") were checked directly against this repo's actual
+      `.claude/CLAUDE.md` and found to **not exist there at all** —
+      REFUTED, not applied. A useful reminder that a finder agent's
+      claimed rule citation still needs verifying against the real file,
+      not trusted at face value.
 - [x] Reconsider `POST /query`'s sync `def` handler — **investigated and
       resolved: staying synchronous, deliberately, not deferred for lack
       of time.** Self-review flagged that the full call chain

@@ -314,6 +314,14 @@ Shipped so far (`src/agentic_rag/api/`):
   value. Re-verified with the exact repro that found the bug: 5
   identical calls at `temperature=0.0` now produce the correct,
   byte-for-byte identical cited answer every time.
+- **Sync `def` handler: investigated, deliberately staying synchronous** —
+  self-review flagged the endpoint's full call chain as blocking I/O with
+  no `async`/`await`, capping concurrency at FastAPI's 40-thread default
+  pool. Investigated rather than assumed worth a refactor: no concurrent-
+  users/requests-per-second target is stated anywhere in
+  `docs/REQUIREMENTS.md`, and embedded Qdrant is already single-process by
+  design regardless of sync/async — the thread pool was never the actual
+  binding constraint. See `docs/REQUIREMENTS.md` §13's decision log.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

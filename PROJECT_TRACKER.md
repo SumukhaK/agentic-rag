@@ -901,15 +901,29 @@ building unwired infrastructure to fill the slot.
 - [ ] Compose `check_for_injection()` / `check_for_foul_language()` /
       `check_output_security()` into `POST /query` — the "Phase 7's job"
       deferred repeatedly throughout Phase 6.
-- [ ] Reconsider `POST /query`'s sync `def` handler — self-review flagged
-      that the full call chain (`rewrite_query`, `answer_with_cache`) is
-      blocking network I/O (Ollama, Qdrant) with no `async`/`await`
-      anywhere; FastAPI runs sync handlers in Starlette's default
-      threadpool (40 threads), so concurrent requests risk queuing behind
-      that cap even though the workload is I/O-bound, not CPU-bound. Not
-      addressed in the `POST /query` PR — the underlying Ollama/Qdrant
-      client calls throughout `orchestration/`/`retrieval/`/`embedding/`
-      would need to become async too, a larger cross-cutting change.
+- [x] Reconsider `POST /query`'s sync `def` handler — **investigated and
+      resolved: staying synchronous, deliberately, not deferred for lack
+      of time.** Self-review flagged that the full call chain
+      (`rewrite_query`, `answer_with_cache`) is blocking network I/O
+      (Ollama, Qdrant) with no `async`/`await` anywhere, so FastAPI's
+      default 40-thread pool becomes the concurrency ceiling. Investigated
+      before committing to (or dismissing) a refactor, per this repo's
+      "never invent architecture, ask/investigate rather than assume"
+      convention: (1) `docs/REQUIREMENTS.md` §2 states no concurrent-
+      users/requests-per-second target anywhere — only corpus size and
+      per-request latency; (2) embedded Qdrant
+      (`indexing/qdrant_setup.py::get_client()`) is already single-
+      process/on-disk-locked *by design* ("Docker isn't available in this
+      dev environment") — this app cannot run multiple workers regardless
+      of sync/async, so the 40-thread pool was never actually the binding
+      constraint, single-process Qdrant already is; (3) the refactor
+      itself is large and cross-cutting (async `generate()`/embedding
+      clients, async `rewrite_query`/`decompose_query`/`plan_and_retrieve`/
+      `generate_answer`/`answer_with_cache`/`hybrid_search`), touching
+      nearly every already-shipped module from Phases 2–6, for a benefit
+      nothing in the spec asks for. Recorded in
+      `docs/REQUIREMENTS.md` §13's decision log. Revisit if a real
+      concurrent-load requirement is ever stated.
 - [ ] Reduce `answer_with_cache()`'s 19-parameter signature — self-review
       noted `POST /query` (its first real caller) hand-marshals 17
       individual `Settings` fields into keyword arguments at the one call

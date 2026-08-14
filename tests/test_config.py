@@ -272,3 +272,21 @@ def test_settings_judge_temperature_overridable_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.judge_temperature == 0.1
+
+
+def test_settings_defaults_generation_temperature(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("GENERATION_TEMPERATURE", raising=False)
+
+    settings = Settings()
+
+    assert settings.generation_temperature == 0.0
+
+
+def test_settings_generation_temperature_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("GENERATION_TEMPERATURE", "0.3")
+
+    settings = Settings()
+
+    assert settings.generation_temperature == 0.3

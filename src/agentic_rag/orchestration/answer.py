@@ -62,6 +62,7 @@ def generate_answer(
     model: str,
     base_url: str,
     timeout: int,
+    temperature: float,
 ) -> str:
     """Produce the final grounded answer for `query` from `planning_result`.
 
@@ -87,6 +88,21 @@ def generate_answer(
     worse than no citation (§8 rule 1 has no exceptions, and a fabricated
     citation carries false authority), so an answer that fails this check
     is replaced with the canonical fallback rather than returned as-is.
+
+    `temperature` is required (e.g. `Settings.generation_temperature`,
+    default `0.0`), matching this codebase's "no defaults on
+    config-mirroring parameters" convention - a separate setting from the
+    Phase 6 judges' `judge_temperature`, not a copy of it, since the
+    tradeoff differs: a judge's single-word verdict has no reason to vary,
+    but a natural-language answer's phrasing plausibly could. It defaults
+    to the same `0.0` anyway because live testing found this isn't just a
+    style/variety question here: calling `generate_answer()` 3x with the
+    identical, already-`sufficient` `PlanningResult` produced the correct,
+    cited answer twice and the canonical fallback once - Ollama's default
+    non-zero sampling made a *correctness*-relevant call inconsistent, the
+    same class of bug already fixed for the judges, just discovered later
+    because this call sat unexercised by a real caller until Phase 7's
+    `POST /query` existed to run it live.
     """
     if not planning_result.sufficient:
         return planning_result.message
@@ -100,5 +116,7 @@ def generate_answer(
         sources=_format_sources(candidates),
         query=query,
     )
-    answer = generate(prompt, model=model, base_url=base_url, timeout=timeout)
+    answer = generate(
+        prompt, model=model, base_url=base_url, timeout=timeout, temperature=temperature
+    )
     return answer if _is_grounded(answer, len(candidates)) else CANNOT_ANSWER_MESSAGE

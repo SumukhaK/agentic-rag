@@ -153,6 +153,7 @@ KWARGS = dict(
     reranker_model="BAAI/bge-reranker-base",
     generation_model="mistral",
     generation_timeout_seconds=60,
+    generation_temperature=0.0,
     known_tiers=["tier-1", "tier-2"],
     retrieval_top_k=10,
     rerank_top_k=4,

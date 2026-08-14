@@ -11,7 +11,7 @@ from agentic_rag.orchestration.planning import (
 )
 from agentic_rag.retrieval.search import SearchCandidate
 
-KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=60)
+KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=60, temperature=0.0)
 
 
 def _candidate(relative_path="tier-1/a.txt", chunk_index=0, text="Arsenal drew 1-1.", access_tier="tier-1"):
@@ -55,6 +55,18 @@ def test_generate_answer_returns_the_generated_text_when_citations_are_valid(moc
     answer = generate_answer(planning_result, query="Who scored?", **KWARGS)
 
     assert answer == "Arsenal drew 1-1 against Chelsea [1]."
+
+
+@patch("agentic_rag.orchestration.answer.generate")
+def test_generate_answer_passes_temperature_through_to_generate(mock_generate):
+    mock_generate.return_value = "Arsenal drew 1-1 against Chelsea [1]."
+    planning_result = _sufficient_result(
+        [RetrievalOutcome(sub_question="Who played?", candidates=[_candidate()])]
+    )
+
+    generate_answer(planning_result, query="Who scored?", **KWARGS)
+
+    assert mock_generate.call_args.kwargs["temperature"] == 0.0
 
 
 @patch("agentic_rag.orchestration.answer.generate")

@@ -300,7 +300,15 @@ Shipped so far (`src/agentic_rag/api/`):
   know" once — the same class of non-determinism bug fixed for the Phase
   6 judges (`Settings.judge_temperature`), but for the final answer call,
   which never got a temperature pinned. Not this endpoint's bug and not
-  fixed here — flagged as its own follow-up.
+  fixed there — **fixed in its own follow-up PR**: `generate_answer()`
+  now takes a required `temperature`, sourced from a new, separate
+  `Settings.generation_temperature` (default `0.0`) rather than reusing
+  `judge_temperature` — a judge's single-word verdict has no reason to
+  vary, but a natural-language answer's phrasing plausibly could, so the
+  two settings can diverge later even though they start at the same
+  value. Re-verified with the exact repro that found the bug: 5
+  identical calls at `temperature=0.0` now produce the correct,
+  byte-for-byte identical cited answer every time.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

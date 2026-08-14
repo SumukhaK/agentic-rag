@@ -981,6 +981,27 @@ building unwired infrastructure to fill the slot.
       REFUTED, not applied. A useful reminder that a finder agent's
       claimed rule citation still needs verifying against the real file,
       not trusted at face value.
+- [x] Make `generate()`'s `temperature` required, not optional — own PR,
+      `fix/require-generate-temperature`. Follow-up flagged during the
+      `decompose_query`/`rewrite_query` temperature fix: the identical
+      "forgot to pin it" bug had now been independently reintroduced
+      **three** times (`generate_answer`, `rewrite_query`,
+      `decompose_query`), each discovered only after the fact via a judge
+      model or retry loop misbehaving, not caught at review time. By this
+      point every real call site (`answer.py`, `decompose.py`, `judge.py`
+      — the shared helper behind all three security judges — and
+      `rewrite.py`) already passed `temperature` explicitly, so the
+      optional `None` default in `llm_client.generate()` was pure
+      unused risk: nothing today relies on it, but nothing stopped a
+      future caller from omitting it and quietly reintroducing the same
+      bug a fourth time. Removed the default, made it a required
+      keyword-only `float`, and `generate()` now always builds the
+      `options.temperature` payload — no behavior change for any existing
+      caller, verified via the full suite (267 passed, 0 failures) and by
+      grepping every call site beforehand. `tests/generation/test_llm_client.py`
+      gained a regression test asserting `TypeError` when `temperature` is
+      omitted; the old "omits options when temperature not given" test was
+      removed since that code path no longer exists.
 - [x] Reconsider `POST /query`'s sync `def` handler — **investigated and
       resolved: staying synchronous, deliberately, not deferred for lack
       of time.** Self-review flagged that the full call chain

@@ -24,7 +24,11 @@ def test_generate_returns_the_response_text(mock_post):
     mock_post.return_value = _mock_response(body={"response": "Hello there!"})
 
     result = generate(
-        "Say hello.", model="mistral", base_url="http://localhost:11434", timeout=30
+        "Say hello.",
+        model="mistral",
+        base_url="http://localhost:11434",
+        timeout=30,
+        temperature=0.0,
     )
 
     assert result == "Hello there!"
@@ -32,29 +36,6 @@ def test_generate_returns_the_response_text(mock_post):
 
 @patch("agentic_rag.generation.llm_client.requests.post")
 def test_generate_calls_the_ollama_generate_endpoint_with_model_and_prompt(mock_post):
-    mock_post.return_value = _mock_response(body={"response": "ok"})
-
-    generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=45)
-
-    mock_post.assert_called_once_with(
-        "http://localhost:11434/api/generate",
-        json={"model": "mistral", "prompt": "Say hello.", "stream": False},
-        timeout=45,
-    )
-
-
-@patch("agentic_rag.generation.llm_client.requests.post")
-def test_generate_omits_options_when_temperature_is_not_given(mock_post):
-    mock_post.return_value = _mock_response(body={"response": "ok"})
-
-    generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=45)
-
-    _, kwargs = mock_post.call_args
-    assert "options" not in kwargs["json"]
-
-
-@patch("agentic_rag.generation.llm_client.requests.post")
-def test_generate_passes_temperature_through_to_ollama_options(mock_post):
     mock_post.return_value = _mock_response(body={"response": "ok"})
 
     generate(
@@ -77,12 +58,55 @@ def test_generate_passes_temperature_through_to_ollama_options(mock_post):
     )
 
 
+def test_generate_requires_temperature_to_be_passed_explicitly():
+    # No default - every caller must decide whether this call should be
+    # deterministic or benefits from sampling variance, rather than
+    # silently inheriting Ollama's own non-deterministic default. The
+    # identical "forgot to pin it" bug was independently reintroduced 3
+    # times in this codebase (generate_answer, rewrite_query,
+    # decompose_query) before temperature was pinned everywhere - a
+    # required parameter makes the mistake impossible to repeat, not just
+    # fixed in the callers that happen to exist today.
+    with pytest.raises(TypeError):
+        generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=45)
+
+
+@patch("agentic_rag.generation.llm_client.requests.post")
+def test_generate_passes_temperature_through_to_ollama_options(mock_post):
+    mock_post.return_value = _mock_response(body={"response": "ok"})
+
+    generate(
+        "Say hello.",
+        model="mistral",
+        base_url="http://localhost:11434",
+        timeout=45,
+        temperature=0.7,
+    )
+
+    mock_post.assert_called_once_with(
+        "http://localhost:11434/api/generate",
+        json={
+            "model": "mistral",
+            "prompt": "Say hello.",
+            "stream": False,
+            "options": {"temperature": 0.7},
+        },
+        timeout=45,
+    )
+
+
 @patch("agentic_rag.generation.llm_client.requests.post")
 def test_generate_raises_generation_error_when_ollama_is_unreachable(mock_post):
     mock_post.side_effect = requests.ConnectionError("connection refused")
 
     with pytest.raises(GenerationError):
-        generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=30)
+        generate(
+            "Say hello.",
+            model="mistral",
+            base_url="http://localhost:11434",
+            timeout=30,
+            temperature=0.0,
+        )
 
 
 @patch("agentic_rag.generation.llm_client.requests.post")
@@ -90,7 +114,13 @@ def test_generate_raises_generation_error_on_a_non_200_response(mock_post):
     mock_post.return_value = _mock_response(status_code=404)
 
     with pytest.raises(GenerationError):
-        generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=30)
+        generate(
+            "Say hello.",
+            model="mistral",
+            base_url="http://localhost:11434",
+            timeout=30,
+            temperature=0.0,
+        )
 
 
 @patch("agentic_rag.generation.llm_client.requests.post")
@@ -100,7 +130,13 @@ def test_generate_raises_generation_error_when_response_key_is_missing(mock_post
     mock_post.return_value = _mock_response(body={"error": "model not found"})
 
     with pytest.raises(GenerationError):
-        generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=30)
+        generate(
+            "Say hello.",
+            model="mistral",
+            base_url="http://localhost:11434",
+            timeout=30,
+            temperature=0.0,
+        )
 
 
 @patch("agentic_rag.generation.llm_client.requests.post")
@@ -110,7 +146,13 @@ def test_generate_raises_generation_error_on_a_non_json_body(mock_post):
     )
 
     with pytest.raises(GenerationError):
-        generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=30)
+        generate(
+            "Say hello.",
+            model="mistral",
+            base_url="http://localhost:11434",
+            timeout=30,
+            temperature=0.0,
+        )
 
 
 @patch("agentic_rag.generation.llm_client.requests.post")
@@ -127,4 +169,10 @@ def test_generate_reports_a_non_json_body_as_an_unexpected_response_not_unreacha
     )
 
     with pytest.raises(GenerationError, match="unexpected response"):
-        generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=30)
+        generate(
+            "Say hello.",
+            model="mistral",
+            base_url="http://localhost:11434",
+            timeout=30,
+            temperature=0.0,
+        )

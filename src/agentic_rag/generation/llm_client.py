@@ -8,26 +8,33 @@ class GenerationError(Exception):
 
 
 def generate(
-    prompt: str, model: str, base_url: str, timeout: int, temperature: float | None = None
+    prompt: str, model: str, base_url: str, timeout: int, *, temperature: float
 ) -> str:
     """Generate text from `prompt` via Ollama's /api/generate endpoint
     (non-streaming - the full response in one call).
 
-    `temperature` is omitted by default, leaving Ollama's own sampling
-    default in place - fine for open-ended generation, where some
-    response variation is harmless or even desirable. Callers doing
-    classification/judgment, where the same input should reliably produce
-    the same verdict, should pass a low value (e.g. `0.0`) explicitly -
+    `temperature` is required, not defaulted - every caller must decide
+    explicitly whether this call should be deterministic (`0.0`, for
+    classification/judgment work where the same input should reliably
+    produce the same verdict) or benefits from sampling variance (a
+    caller-chosen higher value, for open-ended generation or a
+    deliberately-exploratory retry). Leaving it optional previously let
+    the same "forgot to pin it" bug get reintroduced independently three
+    times (`generate_answer`, `rewrite_query`, `decompose_query`) -
     discovered as a real gap, not a theoretical one: the injection judge's
     own live validation suite caught the identical adversarial prompt
     passing on one run and failing on a re-run with no code change,
     confirming Ollama's default (non-zero) sampling temperature made a
     security-relevant verdict genuinely inconsistent, not just a flaky
-    test.
+    test. A required parameter closes the gap for every future caller,
+    not just the ones that exist today.
     """
-    payload = {"model": model, "prompt": prompt, "stream": False}
-    if temperature is not None:
-        payload["options"] = {"temperature": temperature}
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": temperature},
+    }
     try:
         response = requests.post(
             f"{base_url}/api/generate",

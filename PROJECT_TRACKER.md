@@ -859,14 +859,45 @@ building unwired infrastructure to fill the slot.
       422, which is exactly the bug. Fixed with a `field_validator` that
       strips and rejects blank input. Both covered by new regression
       tests in `tests/api/test_query.py`.
-- [ ] Return structured citations from `POST /query` (FR1) — currently
-      the response is `{"answer": str}` with inline `[1]`-style markers an
-      API client can't resolve to a document. Needs `answer_with_cache()`
-      to return citation metadata (`relative_path`/`chunk_index`/
-      `access_tier` per source) alongside the answer, and `SemanticCache`'s
-      entry shape to store it too so a cache hit doesn't lose it — shared
-      Phase 5 infrastructure, deliberately not touched in the `POST
-      /query` PR itself.
+- [x] Return structured citations from `POST /query` (FR1) — own PR,
+      `feat/query-citations`. `generate_answer()` (`orchestration/answer.py`)
+      now returns `AnswerResult(text, citations)` instead of a bare `str`.
+      `citations: list[Citation]` (`number`, `relative_path`, `chunk_index`,
+      `access_tier`) resolves only the source numbers `text` actually cites
+      — not every candidate offered to the prompt, since one the model
+      didn't reference wasn't evidence for anything in the final answer.
+      `answer_with_cache()` (`semantic_cache.py`) and `SemanticCache`'s
+      `_CacheEntry` were updated to carry `AnswerResult` end-to-end, on
+      **both** the cache-hit and cache-miss paths — a cache hit used to
+      return only the bare answer string, silently dropping citations on
+      every repeat of a semantically-similar question even though the
+      original ask had them. `POST /query`'s `QueryResponse` gained a
+      `citations: list[CitationModel]` field alongside `answer`.
+
+      **Live-verified against real retrieval + real Ollama generation**
+      (bypassing `decompose_query()` deliberately — see below): a real
+      indexed chunk, real `hybrid_search()` candidates, and a real
+      `generate_answer()` call correctly resolved `[1]` back to
+      `Citation(number=1, relative_path='tier-1/derby_report.md',
+      chunk_index=0, access_tier='tier-1')` on 2 of 2 grounded responses,
+      and correctly returned `citations=[]` on the 1 fallback response —
+      matching the fallback's own "no citation needed" exemption in
+      `_is_grounded()`.
+
+      **Live testing through the actual `POST /query` endpoint (not
+      bypassing `decompose_query()`) surfaced the `decompose_query()`/
+      `rewrite_query()` temperature bug (tracked above) as a live,
+      currently-reproducible problem, not just a theoretical one**:
+      3 consecutive live end-to-end calls all returned `sufficient=False`
+      for a query a single un-decomposed retrieval answers correctly.
+      Traced to `decompose_query()` itself, called 3× with the identical
+      input: it returned three different pairs of sub-questions, one of
+      which the single indexed chunk didn't fully answer, dragging the
+      combined-sufficiency check down. This is exactly the failure mode
+      the follow-up above was opened for — this task didn't fix it (out of
+      scope; the follow-up owns it), but did produce direct live evidence
+      the bug is real and already affecting retrieval outcomes, not a
+      hypothetical risk.
 - [ ] Compose `check_for_injection()` / `check_for_foul_language()` /
       `check_output_security()` into `POST /query` — the "Phase 7's job"
       deferred repeatedly throughout Phase 6.

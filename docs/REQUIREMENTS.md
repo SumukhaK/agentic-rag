@@ -289,8 +289,18 @@ These rules apply to every answer the system produces, with no exceptions:
    documents to generate an answer — no reliance on the LLM's parametric
    knowledge for factual claims.
 
-**Implemented as** `generate_answer()` (`src/agentic_rag/orchestration/answer.py`).
-All three rules are encoded directly in the generation prompt: sources are
+**Implemented as** `generate_answer()` (`src/agentic_rag/orchestration/answer.py`),
+returning an `AnswerResult(text, citations)` — not a bare `str`. Rule 1's
+"document + exact chunk" was, for a while, satisfied only *inside the
+generation prompt* (the model was told to cite `[N]`) with no way for a
+caller to resolve `[N]` back to an actual document — self-review of the
+`POST /query` PR (Phase 7) caught this as a real end-to-end gap, not a
+theoretical one, and it's now fixed: `citations` resolves every `[N]` the
+answer text actually cites into its `relative_path`/`chunk_index`/
+`access_tier`, threaded all the way through `answer_with_cache()` and
+`SemanticCache` (both cache-hit and cache-miss paths) to `POST /query`'s
+response. All three rules are also encoded directly in the generation
+prompt itself: sources are
 listed with a citation number plus their path, chunk index, and access tier
 (rule 1), the model is instructed to reply with the canonical fallback
 verbatim if the sources don't suffice (rule 2), and told not to use

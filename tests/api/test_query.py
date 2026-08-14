@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from agentic_rag.api.app import create_app
 from agentic_rag.config import Settings
+from agentic_rag.orchestration.answer import AnswerResult, Citation
 from agentic_rag.orchestration.rewrite import ConversationTurn
 from agentic_rag.retrieval.access import UnknownAccessTierError
 
@@ -26,14 +27,47 @@ def test_query_returns_the_answer_from_answer_with_cache(tmp_path):
     with _client(tmp_path) as client:
         with (
             patch("agentic_rag.api.routers.query.rewrite_query", return_value="rewritten?"),
-            patch("agentic_rag.api.routers.query.answer_with_cache", return_value="the answer"),
+            patch(
+                "agentic_rag.api.routers.query.answer_with_cache",
+                return_value=AnswerResult(text="the answer", citations=[]),
+            ),
         ):
             response = client.post(
                 "/query", json={"query": "who won?", "user_tier": "tier-1", "history": []}
             )
 
     assert response.status_code == 200
-    assert response.json() == {"answer": "the answer"}
+    assert response.json() == {"answer": "the answer", "citations": []}
+
+
+def test_query_returns_citations_resolving_each_source(tmp_path):
+    citation = Citation(
+        number=1, relative_path="tier-1/derby.md", chunk_index=2, access_tier="tier-1"
+    )
+    with _client(tmp_path) as client:
+        with (
+            patch("agentic_rag.api.routers.query.rewrite_query", return_value="rewritten?"),
+            patch(
+                "agentic_rag.api.routers.query.answer_with_cache",
+                return_value=AnswerResult(text="Arsenal won [1].", citations=[citation]),
+            ),
+        ):
+            response = client.post(
+                "/query", json={"query": "who won?", "user_tier": "tier-1", "history": []}
+            )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "answer": "Arsenal won [1].",
+        "citations": [
+            {
+                "number": 1,
+                "relative_path": "tier-1/derby.md",
+                "chunk_index": 2,
+                "access_tier": "tier-1",
+            }
+        ],
+    }
 
 
 def test_query_rewrites_history_before_retrieval(tmp_path):
@@ -42,7 +76,7 @@ def test_query_rewrites_history_before_retrieval(tmp_path):
             patch(
                 "agentic_rag.api.routers.query.rewrite_query", return_value="rewritten?"
             ) as mock_rewrite,
-            patch("agentic_rag.api.routers.query.answer_with_cache", return_value="the answer"),
+            patch("agentic_rag.api.routers.query.answer_with_cache", return_value=AnswerResult(text="the answer", citations=[])),
         ):
             client.post(
                 "/query",
@@ -66,7 +100,7 @@ def test_query_passes_the_rewritten_query_and_user_tier_to_answer_with_cache(tmp
                 return_value="who won the second leg of the Arsenal tie?",
             ),
             patch(
-                "agentic_rag.api.routers.query.answer_with_cache", return_value="the answer"
+                "agentic_rag.api.routers.query.answer_with_cache", return_value=AnswerResult(text="the answer", citations=[])
             ) as mock_answer,
         ):
             client.post(
@@ -125,7 +159,7 @@ def test_query_defaults_history_to_empty(tmp_path):
             patch(
                 "agentic_rag.api.routers.query.rewrite_query", return_value="who won?"
             ) as mock_rewrite,
-            patch("agentic_rag.api.routers.query.answer_with_cache", return_value="the answer"),
+            patch("agentic_rag.api.routers.query.answer_with_cache", return_value=AnswerResult(text="the answer", citations=[])),
         ):
             response = client.post("/query", json={"query": "who won?", "user_tier": "tier-1"})
 

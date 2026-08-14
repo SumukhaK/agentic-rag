@@ -845,6 +845,30 @@ building unwired infrastructure to fill the slot.
       repro at Ollama's default temperature had produced the wrong
       fallback 1 time in 3.
 
+      **Self-review of this fix found the identical, unfixed bug class in
+      two sibling functions**: `decompose_query()`
+      (`orchestration/decompose.py`) and `rewrite_query()`
+      (`orchestration/rewrite.py`) both call `generate()` with no
+      `temperature` argument, so both still run at Ollama's default
+      non-zero sampling today. These sit *upstream* of retrieval — a
+      non-deterministic rewrite or decomposition can silently change what
+      gets embedded and searched for on an identical user query, the same
+      "2 correct, 1 wrong" pattern just one hop earlier in the pipeline.
+      Not fixed in this PR — same "each concern gets its own PR" reasoning
+      as every prior instance of this bug class (`judge_temperature` was
+      found in `injection_judge.py` during `check_output_security()`'s
+      PR and fixed in its own follow-up, PR #31). Tracked below.
+- [ ] Pin temperature for `decompose_query()` and `rewrite_query()` —
+      both call `generate()` with no `temperature`, discovered during
+      self-review of the `generate_answer()` temperature fix above (same
+      bug class, upstream of retrieval instead of downstream of it).
+      Needs its own `Settings` field(s) (reusing `generation_temperature`
+      may or may not be right — decide deliberately, don't default to
+      reuse just because it's convenient, per the reasoning already
+      recorded for why `generation_temperature` isn't `judge_temperature`)
+      and live re-verification with a repeated-call repro, the same
+      pattern used for the other two fixes in this bug class.
+
       **Self-review found and fixed two real validation gaps**: (1) an
       unknown `user_tier` (e.g. a typo) reached `answer_with_cache()` →
       `allowed_tiers_for()` and raised `UnknownAccessTierError` unhandled,

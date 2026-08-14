@@ -95,3 +95,16 @@ def test_check_for_injection_includes_the_query_in_the_prompt_between_delimiters
     assert "<<<MESSAGE_START>>>" in prompt
     assert "<<<MESSAGE_END>>>" in prompt
     assert "Who won the match?" in prompt
+
+
+@patch("agentic_rag.orchestration.injection_judge.generate")
+def test_check_for_injection_forwards_temperature_to_generate(mock_generate):
+    # Regression guard for the non-determinism this parameter fixes: a
+    # future edit that drops `temperature` from the generate() call would
+    # otherwise pass every other test in this file, since none of them
+    # inspect call_args.kwargs.
+    mock_generate.return_value = "CLEAN"
+
+    check_for_injection("q", **KWARGS)
+
+    assert mock_generate.call_args.kwargs["temperature"] == 0.0

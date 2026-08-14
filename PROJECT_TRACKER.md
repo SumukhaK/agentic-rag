@@ -516,7 +516,9 @@ building unwired infrastructure to fill the slot.
          answer reaches the user, so it can't depend on a judge's
          judgment to catch a retrieval-time filter that already failed.
       2. **A successful injection reflected in the answer itself**, via
-         the same `classify_injection_verdict()` parser
+         the same `classify_verdict()` parser (renamed from
+         `classify_injection_verdict()` once a third judge needed it - see
+         Phase 6's foul-language-refusal entry below)
          `check_for_injection()` uses (promoted to a shared, public
          function in `injection_judge.py` specifically for this reuse).
          Checks the generated *answer*, not whether a source chunk merely
@@ -570,12 +572,51 @@ building unwired infrastructure to fill the slot.
       delimiter-confusion attack) + 1 deterministic out-of-tier case —
       **11/11 correct** against real Ollama/`mistral`, skipped gracefully
       if unavailable.
-- [ ] Foul-language refusal
+- [x] Foul-language refusal — the system refuses to engage with
+      foul/abusive language at any stage of the conversation (§12).
+      **Implemented as** `check_for_foul_language()`
+      (`src/agentic_rag/orchestration/foul_language.py`), returning
+      `FoulLanguageCheckResult(is_foul, raw_judge_response)`. Same
+      delimited-prompt, fail-closed, `Settings.judge_temperature`-driven
+      pattern as the other two Phase 6 judges — and reuses the exact same
+      `classify_verdict()` parser (`injection_judge.py`), now on its third
+      consumer. That third use is why the parser got renamed from
+      `classify_injection_verdict()` to `classify_verdict()` in this PR:
+      its behavior was never actually injection-specific (it just checks
+      whether a response's first word is unambiguously `CLEAN`), and a
+      third caller confirmed that rather than assumed it.
+
+      **Distinct refusal message, not the shared canonical fallback** —
+      a deliberate departure from how the injection judge and
+      output-security check both handle `is_safe=False` (reusing
+      `CANNOT_ANSWER_MESSAGE` specifically to avoid revealing to an
+      attacker which security check caught them). Foul-language refusal
+      isn't an adversarial-calibration risk the same way: there's nothing
+      for a user to learn from "please don't use that language" that
+      helps them attack the system, and responding to abusive input with
+      "I do not know the answer based on indexed documents" would be
+      confusing, unhelpful UX that doesn't match what actually happened.
+      `FOUL_LANGUAGE_REFUSAL_MESSAGE` is its own constant for this reason.
+
+      **Empirical validation (Definition-of-Done)**: committed,
+      reproducible fixture (`tests/orchestration/test_foul_language_live.py`)
+      — 8 clean messages (including football content that reads as blunt,
+      dramatic, or uses mild swearing as an intensifier — "that tackle was
+      reckless as hell" — specifically to probe false positives) + 6 foul
+      messages (profanity, hostility, insults, and one combining an
+      injection-style override attempt with an insult) — **14/14 correct**
+      against real Ollama/`mistral` on the first attempt, no prompt tuning
+      needed (unlike the other two judges, whose first drafts both had
+      real, live-discovered accuracy bugs) — this task read as a more
+      clear-cut binary classification than "is this an injection attempt."
+      Not wired into any caller yet, same as the other two Phase 6 checks.
+
+      **This completes Phase 6.**
 - [x] Make `check_for_injection()` deterministic (`temperature`) — the same
       non-determinism bug fixed for `check_output_security()` above (PR
       #30) was proven via that PR's live testing to affect
-      `check_for_injection()` too (they share `classify_injection_verdict()`
-      and the same underlying `generate()` call), but the code fix was
+      `check_for_injection()` too (they share the same `classify_verdict()`
+      parser and the same underlying `generate()` call), but the code fix was
       deliberately left out of that PR per the "each concern gets its own
       PR" lesson from the secrets-audit PR's self-review. Fixed in PR #31
       (`fix/injection-judge-temperature`): `check_for_injection()` now

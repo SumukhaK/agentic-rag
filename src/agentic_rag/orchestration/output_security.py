@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from agentic_rag.generation.llm_client import generate
-from agentic_rag.orchestration.injection_judge import classify_injection_verdict
+from agentic_rag.orchestration.injection_judge import classify_verdict
 from agentic_rag.retrieval.access import allowed_tiers_for
 from agentic_rag.retrieval.search import SearchCandidate
 
@@ -138,7 +138,7 @@ def check_output_security(
         prompt, model=model, base_url=base_url, timeout=timeout, temperature=temperature
     )
 
-    if classify_injection_verdict(response):
+    if classify_verdict(response):
         return OutputSecurityCheckResult(
             is_safe=False,
             reason=OutputSecurityReason.INJECTION_DETECTED_IN_OUTPUT,

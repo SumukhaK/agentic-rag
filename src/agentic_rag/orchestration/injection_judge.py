@@ -22,13 +22,17 @@ class InjectionCheckResult:
     raw_response: str
 
 
-def classify_injection_verdict(response: str) -> bool:
-    """Fail-closed classification from an INJECTION/CLEAN judge's raw
-    response - shared by `check_for_injection` (this module) and
-    `check_output_security` (`output_security.py`), which asks a
-    differently-worded question of the same judge model but expects the
-    identical single-word answer shape and needs the identical parsing
-    safety.
+def classify_verdict(response: str) -> bool:
+    """Fail-closed classification from a CLEAN-vs-flagged judge's raw
+    response - shared by every local judge in this codebase
+    (`check_for_injection` in this module, `check_output_security` in
+    `output_security.py`, `check_for_foul_language` in
+    `foul_language.py`), each of which asks a differently-worded question
+    of the same judge model but expects the identical single-word answer
+    shape (CLEAN vs. one flagged keyword) and needs the identical parsing
+    safety. Genuinely generic, not injection-specific despite the module
+    it lives in - confirmed by its second and third callers needing no
+    changes to reuse it, only a differently-worded prompt.
 
     Only the FIRST word is inspected, not a substring search across the
     whole response - a whole-response search misfires two ways: "unclean"
@@ -37,7 +41,9 @@ def classify_injection_verdict(response: str) -> bool:
     "injection" (e.g. discussing a player's medical injection - a genuine
     football topic) would fail CLOSED on a legitimate query for the wrong
     reason. Both were found and verified live during self-review. Anything
-    other than an unambiguous, leading CLEAN is treated as an injection.
+    other than an unambiguous, leading CLEAN is treated as flagged - the
+    caller decides what "flagged" means (injection, unsafe output, foul
+    language), this parser only judges the verdict word.
     """
     match = _FIRST_WORD_RE.search(response)
     if match is None:
@@ -98,6 +104,4 @@ def check_for_injection(
         prompt, model=model, base_url=base_url, timeout=timeout, temperature=temperature
     )
 
-    return InjectionCheckResult(
-        is_injection=classify_injection_verdict(response), raw_response=response
-    )
+    return InjectionCheckResult(is_injection=classify_verdict(response), raw_response=response)

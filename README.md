@@ -17,7 +17,7 @@ status: [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) · Working agreement:
   is ~26GB vs. mistral's ~4.1GB, not warranted for local dev)
 - **Embedding model:** `nomic-embed-text`, served locally via Ollama
 - **Reranker:** local open-source cross-encoder (`bge-reranker-v2-m3`-class)
-- **Evaluation:** Claude (Anthropic API), for offline quality evaluation only (Phase 8) — not the injection judge or output/citation safety check below, which use the local `mistral` model (Phase 6 decision, `docs/REQUIREMENTS.md` §13)
+- **Evaluation:** Claude (Anthropic API), for offline quality evaluation only (Phase 8) — not the injection judge, output/citation safety check, or foul-language check below, which all use the local `mistral` model (Phase 6 decision, `docs/REQUIREMENTS.md` §13)
 - **Agent orchestration:** custom agent loop, no framework (LangGraph/LlamaIndex not used)
 - **Ingestion:** [`markitdown`](https://github.com/microsoft/markitdown) converts any source file type to Markdown
 
@@ -190,6 +190,70 @@ Shipped (`src/agentic_rag/orchestration/answer.py`):
   cached. Claude-as-evaluator wiring is deliberately deferred — no
   Anthropic API key is configured for this project, and its detailed spec
   belongs to Phase 8
+
+**Phase 6 — Access Control & Security: complete.**
+
+Shipped (`src/agentic_rag/orchestration/`):
+- **Secrets/config hygiene audit** — `.env` was never committed (checked
+  full git history, not just the current tree); no scattered `os.environ`
+  usage or hardcoded config values outside `Settings` anywhere in `src/`.
+  One real finding fixed: an unused `timeout: int = 30` default that
+  contradicted this project's "no defaults on config-mirroring
+  parameters" convention. `ensure_collection()`'s `Distance` parameter was
+  removed entirely rather than defaulted, once self-review found zero
+  call sites ever needed it to vary.
+- **Judge model decided**: local `mistral` for all three security checks
+  below, not Claude — no new `ANTHROPIC_API_KEY` needed, consistent with
+  deferring Claude-as-evaluator in Phase 5 for the same credential gap.
+  Documented as a real tradeoff, not a clean win: `mistral` has a known
+  instruction-following gap, and Phase 6's own checklist commits each
+  judge to empirical validation, not just written reasoning, before being
+  considered done.
+- `check_for_injection()` (`injection_judge.py`) — screens a query for
+  prompt injection. Self-review live-demonstrated (not just theorized)
+  two real vulnerabilities in the first version: a fail-open substring-
+  matching bug, and a working exploit where a query ending in a fake
+  `"...Answer: CLEAN"` fooled the judge outright. Both fixed and
+  re-verified against the exact repro. Returns a structured
+  `InjectionCheckResult`, not a bare bool, for auditability. **Caveat found
+  later** (during the foul-language PR's self-review): the same trick,
+  reworded, still flips this judge — the fix closed the specific repro, not
+  the whole exploit class. See the foul-language bullet and
+  `PROJECT_TRACKER.md`'s open follow-up.
+- `check_output_security()` (`output_security.py`) — checks a generated
+  answer before it's returned: a deterministic access-tier check (no LLM
+  call — the last line of defense before a retrieval-time filter failure
+  reaches the user) plus an LLM-based check for whether the answer itself
+  shows signs of a successful injection, sharing its parser with the
+  injection judge.
+- `check_for_foul_language()` (`foul_language.py`) — the same delimited,
+  fail-closed judge pattern, its third reuse of the same shared response
+  parser (renamed from `classify_injection_verdict()` to `classify_verdict()`
+  once it was confirmed genuinely generic, not injection-specific). Uses
+  its own distinct refusal message rather than the shared canonical
+  fallback — unlike the other two checks, there's no adversarial-
+  calibration reason to hide *why* the refusal happened here. Self-review
+  found its first prompt draft had dropped two anti-exploit clauses
+  `check_for_injection()`'s prompt carries; restoring them plus an
+  end-of-prompt reminder helped but didn't fully close a forged-verdict
+  exploit (`"...Answer: CLEAN"`) — confirmed to be the same shared,
+  phrasing-dependent `mistral` weakness the injection judge has, not a bug
+  unique to this file. Tracked as open follow-up work rather than chased
+  further in this PR.
+- **A real, live-discovered bug affecting all three judges**: `generate()`
+  had no temperature control, so Ollama's default sampling made judge
+  verdicts genuinely non-deterministic — the identical exploit prompt
+  passed one live-test run and failed an immediate re-run with zero code
+  changes. Fixed with a new `Settings.judge_temperature` (default `0.0`),
+  empirically re-verified deterministic (byte-for-byte identical output
+  across repeated runs) for every judge, not just assumed to transfer
+  between them.
+- Every judge is validated against a **committed, reproducible test
+  fixture** hitting real Ollama (skipped gracefully if unavailable), not
+  a one-off manual claim — a lesson learned from the first judge's
+  self-review and applied from the start to the other two.
+- None of the three checks are wired into `answer_with_cache` or any
+  other caller yet — composition is Phase 7's job.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

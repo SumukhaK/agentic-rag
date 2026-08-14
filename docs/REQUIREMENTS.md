@@ -514,12 +514,13 @@ start at the same value.
   generation. **Implemented as** `check_for_injection()`
   (`src/agentic_rag/orchestration/injection_judge.py`) — returns an
   `InjectionCheckResult(is_injection, raw_response)`, not a bare bool, so a
-  miss is at least auditable after the fact. **Not wired into any caller
-  yet** — `answer_with_cache` and every other current entrypoint still call
-  straight through to retrieval/generation with no screening in front of
-  them, so the protection this bullet describes does not exist end-to-end
-  in the running system today; composing it in is Phase 7's job, including
-  deciding whether to screen the raw or the rewritten query.
+  miss is at least auditable after the fact. **Composed into `POST /query`**
+  (`api/routers/query.py`'s `_screen_input()`) — screens the **raw** query,
+  before `rewrite_query()` runs at all, resolving the "raw or rewritten"
+  open question: screening a rewritten query would let a malicious raw
+  query reach `rewrite_query()`'s own unscreened LLM call first. Runs
+  concurrently with the foul-language check below (thread pool, same
+  pattern as `hybrid_search()`'s dense/sparse embedding).
   Empirically validated against 20 committed, reproducible prompts
   (`tests/orchestration/test_injection_judge_live.py`, skipped gracefully
   if Ollama/`mistral` is unavailable) — not just a one-off manual count in
@@ -553,9 +554,17 @@ start at the same value.
   `check_output_security()` (`src/agentic_rag/orchestration/output_security.py`)
   — a deterministic access-tier check (no LLM call) plus an LLM-based check
   of whether the generated answer itself shows signs of a successful
-  injection, sharing its response parser with `check_for_injection()`. **Not
-  wired into any caller yet** — same status as the injection judge above,
-  for the same reason (composition is Phase 7's job). Empirically validated
+  injection, sharing its response parser with `check_for_injection()`.
+  **Composed into `POST /query`** — runs after `answer_with_cache()`,
+  checked against the rewritten query (what the answer was actually
+  generated for) and the answer text; a flag replaces the response with
+  the canonical fallback and an empty citation list. Required a real
+  interface change, discovered while wiring: this function took
+  `candidates: list[SearchCandidate]`, but the API layer only has
+  `Citation` (a smaller, FR1-specific type) — traced to the tier check
+  only ever reading `.access_tier`, so the parameter became
+  `cited_access_tiers: list[str]` directly, dropping this module's
+  dependency on `retrieval.search` entirely. Empirically validated
   11/11 against a committed fixture
   (`tests/orchestration/test_output_security_live.py`); see
   `PROJECT_TRACKER.md`'s Phase 6 log for the full tuning history and a
@@ -576,9 +585,9 @@ start at the same value.
   `FOUL_LANGUAGE_REFUSAL_MESSAGE` rather than the shared canonical fallback —
   there's no adversarial-calibration reason to hide which check caught a user
   here, and a direct "please rephrase" message is clearer UX than reusing the
-  "I do not know the answer" wording. **Not wired into any caller yet** — same
-  status as the injection judge and output-validation checks above; composition
-  is Phase 7's job. Empirically validated 14/14 against a committed fixture
+  "I do not know the answer" wording. **Composed into `POST /query`** —
+  runs concurrently with `check_for_injection()` against the raw query, in
+  the same `_screen_input()` helper. Empirically validated 14/14 against a committed fixture
   (`tests/orchestration/test_foul_language_live.py`) — the CLEAN/FOUL
   classification itself needed no tuning. Deterministic by construction —
   takes the same required `temperature` keyword argument as its siblings

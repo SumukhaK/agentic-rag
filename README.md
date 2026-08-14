@@ -261,8 +261,8 @@ Shipped (`src/agentic_rag/orchestration/`):
   fixture** hitting real Ollama (skipped gracefully if unavailable), not
   a one-off manual claim — a lesson learned from the first judge's
   self-review and applied from the start to the other two.
-- None of the three checks are wired into `answer_with_cache` or any
-  other caller yet — composition is Phase 7's job.
+- Composed into `POST /query` in Phase 7 (below) — see that section for
+  how.
 
 **Phase 7 — API & Delivery: in progress.**
 
@@ -292,9 +292,22 @@ Shipped so far (`src/agentic_rag/api/`):
   Live-verified against real retrieval + real Ollama generation: `[1]`
   correctly resolved to the actual indexed chunk on every grounded
   response, and correctly came back empty on the canonical fallback.
-  **Security judges are not composed in yet** — deliberately
-  sequenced to land after the concurrent judge-hardening/generalization
-  work merged, rather than building against three files mid-refactor.
+  **Security judges composed in** (own follow-up PR,
+  `feat/wire-security-judges`, deliberately sequenced to land after the
+  concurrent judge-hardening/generalization work merged rather than
+  building against three files mid-refactor): `check_for_injection()` and
+  `check_for_foul_language()` run **concurrently** (thread pool, same
+  pattern as `hybrid_search()`'s dense/sparse embedding) against the raw
+  query before `rewrite_query()` even runs. `check_output_security()` runs
+  against the rewritten query and the generated answer before it's
+  returned. Any flag replaces the response with the appropriate refusal
+  and an empty citation list. Discovered and fixed a real interface gap
+  while wiring: `check_output_security()` required a full
+  `list[SearchCandidate]`, but the API layer only has `Citation` (FR1's
+  smaller citation-metadata type) - traced to the function only ever
+  reading `.access_tier`, so simplified the parameter to
+  `cited_access_tiers: list[str]`, dropping `output_security.py`'s
+  dependency on `retrieval.search` entirely.
 - **Live-verified end-to-end**, not just mocked: indexed a real document
   into a real embedded Qdrant collection, queried it through the actual
   FastAPI app (`TestClient`, real Ollama calls). A multi-turn follow-up
@@ -337,6 +350,15 @@ Shipped so far (`src/agentic_rag/api/`):
   accidental randomness into an intentional retry strategy. Live-verified:
   5 identical decompositions at `temperature=0.0` (was non-deterministic
   before), genuine variation at `0.4`.
+- **Security-judge wiring: live verification blocked by a local resource
+  issue, documented rather than silently skipped** — the local Ollama
+  server was returning `500` on every generation call while this shipped,
+  root-caused (via direct `curl` to Ollama's own API, nothing to do with
+  this codebase) to a GPU/Vulkan memory allocation failure - the same
+  class of local resource exhaustion behind `test_rerank.py`'s ONNX
+  failures elsewhere. All 16 new/updated mocked tests and the full suite
+  pass with 0 failures; live fixtures skip gracefully rather than lying
+  about being verified. See `PROJECT_TRACKER.md`'s Phase 7 log.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

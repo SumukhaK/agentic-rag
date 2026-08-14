@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,11 +13,64 @@ from agentic_rag.api.dependencies import (
 from agentic_rag.api.schemas import CitationModel, QueryRequest, QueryResponse
 from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache
+from agentic_rag.orchestration.foul_language import (
+    FOUL_LANGUAGE_REFUSAL_MESSAGE,
+    check_for_foul_language,
+)
+from agentic_rag.orchestration.injection_judge import check_for_injection
+from agentic_rag.orchestration.output_security import check_output_security
+from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE
 from agentic_rag.orchestration.rewrite import ConversationTurn, rewrite_query
 from agentic_rag.orchestration.semantic_cache import SemanticCache, answer_with_cache
 from agentic_rag.retrieval.access import UnknownAccessTierError
 
 router = APIRouter()
+
+
+def _screen_input(query: str, *, settings: Settings) -> str | None:
+    """Screen `query` for a prompt injection attempt and for foul/abusive
+    language before it's used anywhere else - checked *before*
+    `rewrite_query()` runs at all, since `rewrite_query()` makes its own
+    LLM call that the raw query would otherwise reach unchecked.
+
+    Both checks run concurrently via a thread pool - the same pattern
+    `hybrid_search()` (`retrieval/search.py`) already established for
+    independent Ollama-backed work on the hot path, since neither check
+    depends on the other's result.
+
+    Returns the refusal message to send back verbatim if either check
+    flags the query, `None` if both are clean. Injection reuses the
+    single canonical `CANNOT_ANSWER_MESSAGE` (REQUIREMENTS.md §8 rule 2)
+    rather than a distinct message, deliberately, so a would-be attacker
+    can't tell an injection attempt was specifically what triggered a
+    refusal versus any other reason the system declined to answer. Foul
+    language gets its own distinct `FOUL_LANGUAGE_REFUSAL_MESSAGE`
+    instead - see `foul_language.py`'s docstring for why that one isn't
+    an adversarial-calibration risk the same way.
+
+    Only the current turn's `query` is screened, not the conversation
+    history the client resent alongside it - REQUIREMENTS.md §12 says
+    "incoming user queries," and history screening (each prior turn was
+    already screened as *its own* current query when it was first sent)
+    is a separate concern this doesn't attempt to solve.
+    """
+    judge_kwargs = dict(
+        model=settings.generation_model,
+        base_url=settings.ollama_base_url,
+        timeout=settings.generation_timeout_seconds,
+        temperature=settings.judge_temperature,
+    )
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        injection_future = executor.submit(check_for_injection, query, **judge_kwargs)
+        foul_language_future = executor.submit(check_for_foul_language, query, **judge_kwargs)
+        injection_result = injection_future.result()
+        foul_language_result = foul_language_future.result()
+
+    if injection_result.is_injection:
+        return CANNOT_ANSWER_MESSAGE
+    if foul_language_result.is_foul:
+        return FOUL_LANGUAGE_REFUSAL_MESSAGE
+    return None
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -35,9 +89,19 @@ def query(
     `AnswerResult` (`orchestration/answer.py`) for why this is a separate
     field rather than requiring the caller to parse `answer` itself.
 
-    Security judges (`check_for_injection`, `check_for_foul_language`,
-    `check_output_security`) are deliberately not composed in yet - see
-    PROJECT_TRACKER.md's Phase 7 log.
+    All three security judges (REQUIREMENTS.md §12) are composed in:
+    `_screen_input()` checks the raw query for a prompt injection attempt
+    and for foul/abusive language before anything else runs.
+    `check_output_security()` checks the generated answer - both for an
+    access-tier leak (deterministic) and for signs of a successful
+    injection reflected in the output (LLM-based) - before it's returned;
+    a flagged answer is replaced with the canonical fallback and an empty
+    citation list, the same "don't reveal which check caught it" reasoning
+    `_screen_input()` uses for the injection case. `check_output_security`
+    is checked against the *rewritten* query, not the raw one - it's
+    asking "does this answer make sense for what was actually retrieved
+    against," which is the rewritten, self-contained question, not
+    whatever ambiguous phrasing the user originally typed.
 
     A `GenerationError` (Ollama unreachable, etc.) is not caught here and
     surfaces as FastAPI's default 500 - structured error responses are an
@@ -45,6 +109,10 @@ def query(
     unknown `user_tier` (`UnknownAccessTierError`) *is* caught, since it's
     a client input error, not an infrastructure failure - returned as 422.
     """
+    refusal = _screen_input(payload.query, settings=settings)
+    if refusal is not None:
+        return QueryResponse(answer=refusal, citations=[])
+
     history = [ConversationTurn(t.user_query, t.assistant_answer) for t in payload.history]
     rewritten_query = rewrite_query(
         history,
@@ -82,6 +150,20 @@ def query(
         )
     except UnknownAccessTierError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    security_result = check_output_security(
+        rewritten_query,
+        answer.text,
+        [citation.access_tier for citation in answer.citations],
+        payload.user_tier,
+        settings.access_tiers,
+        model=settings.generation_model,
+        base_url=settings.ollama_base_url,
+        timeout=settings.generation_timeout_seconds,
+        temperature=settings.judge_temperature,
+    )
+    if not security_result.is_safe:
+        return QueryResponse(answer=CANNOT_ANSWER_MESSAGE, citations=[])
 
     return QueryResponse(
         answer=answer.text,

@@ -1,11 +1,12 @@
 from agentic_rag.api.schemas import (
     CitationModel,
     ConversationTurnModel,
+    HealthResponse,
     QueryRequest,
     QueryResponse,
 )
 
-_MODELS = (QueryRequest, QueryResponse, CitationModel, ConversationTurnModel)
+_MODELS = (QueryRequest, QueryResponse, CitationModel, ConversationTurnModel, HealthResponse)
 
 
 def _field_descriptions(model) -> dict[str, str | None]:
@@ -39,4 +40,9 @@ def test_citation_model_fields_are_all_documented():
 
 def test_conversation_turn_model_fields_are_all_documented():
     descriptions = _field_descriptions(ConversationTurnModel)
+    assert all(descriptions.values())
+
+
+def test_health_response_fields_are_all_documented():
+    descriptions = _field_descriptions(HealthResponse)
     assert all(descriptions.values())

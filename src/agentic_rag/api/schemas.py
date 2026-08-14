@@ -1,4 +1,18 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
+
+
+class HealthResponse(BaseModel):
+    """Response body for `GET /health`."""
+
+    status: Literal["ok"] = Field(
+        description=(
+            "Always \"ok\" when this endpoint responds at all - a non-200 status "
+            "or a failed connection is the actual signal of an unhealthy process, "
+            "not a field value to inspect."
+        )
+    )
 
 
 class ConversationTurnModel(BaseModel):

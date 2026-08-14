@@ -1129,6 +1129,78 @@ building unwired infrastructure to fill the slot.
 
       10 new tests (`tests/api/test_app.py`, `tests/api/test_schemas.py`).
       Full suite: 283 passed, 0 failures.
+
+      **Self-review found real problems in the fix meant to catch exactly
+      this class of problem.** 7 finder angles (run at high effort, one
+      per correctness/cleanup/altitude/conventions concern) converged
+      independently - 3-4 of them separately, via direct reads of the
+      installed `fastapi` source - on the same defect cluster in
+      `_custom_openapi`: (1) its cache check
+      (`if app.openapi_schema: return app.openapi_schema`) dropped
+      FastAPI's own route-version invalidation, while its docstring
+      falsely claimed to cache "the same way FastAPI's own default
+      `openapi()` method caches it" - a router registered after the
+      first `/openapi.json` hit would have been silently missing
+      forever; (2) it hand-forwarded only 4 of the ~12 kwargs FastAPI's
+      real default forwards to `get_openapi()` (`contact`,
+      `license_info`, `tags`, `servers`, `webhooks`, ... all silently
+      dropped); (3) its unguarded `schema["paths"]["/query"]["post"]
+      ["responses"]["422"]` indexing could `KeyError` and take down
+      `/openapi.json` **for the entire app**, not just `/query`, if the
+      route's validated-body precondition ever changed. Fixed by
+      abandoning the hand-rolled `get_openapi()` call entirely: capture
+      `app.openapi` (FastAPI's own bound method) *before* overriding it,
+      delegate to it first, and only patch the 422 description on the
+      dict it returns - mutating that dict also mutates what FastAPI
+      itself cached on `app.openapi_schema` (dicts are references), so
+      correct caching, full kwarg forwarding, and route-version
+      invalidation are inherited for free instead of reimplemented by
+      hand. The 422 patch now uses `.get()` chains instead of `[...]`
+      indexing, so a future route-shape change silently skips the patch
+      instead of crashing the whole schema. A new regression test
+      (`test_openapi_schema_regenerates_when_a_route_is_added_after_the_first_call`)
+      locks in the cache-invalidation fix directly - added a router after
+      the first `/openapi.json` call and asserted it appears on the next
+      one, which fails against the original `if app.openapi_schema: ...`
+      guard.
+
+      Also fixed: `version="0.1.0"` was a hardcoded literal manually kept
+      in sync with `pyproject.toml` via a comment and a drift-catching
+      test - violates this repo's own `.claude/CLAUDE.md` §5
+      ("configuration lives in exactly one place... no magic numbers
+      duplicated at call sites"). Now sourced via
+      `importlib.metadata.version("agentic-rag")`, so there's exactly one
+      copy of the version and drift is structurally impossible rather
+      than merely test-detected. `HealthResponse` moved from `health.py`
+      into `schemas.py`, matching every other request/response model's
+      established location (was the only one defined inline in a router
+      file). `QUERY_422_DESCRIPTION`'s public-facing text was leaking
+      internal implementation narration ("`api/app.py`'s custom
+      `openapi()`...", the rejected `responses=` approach) into the
+      actual OpenAPI schema/Swagger UI that API consumers see - trimmed
+      to only the two response shapes; the "why" now lives solely in
+      `_custom_openapi`'s own docstring, where a maintainer would
+      actually look for it.
+
+      Two findings surfaced but **not** applied, both explicitly
+      out of scope rather than silently dropped: reusing HTTP 422 for
+      both FastAPI's own validation failures and the business-rule
+      `UnknownAccessTierError` is architecturally the actual root cause
+      of needing this whole custom-`openapi()` mechanism - giving the
+      business error its own status code would make the schema already
+      accurate with zero custom code, but that's a real behavior/status-
+      code change affecting existing tests and API consumers, not a
+      docs-only fix, so it's deferred as its own follow-up rather than
+      folded in here. Separately, this PR's single commit is typed
+      `docs` despite touching runtime source (`.claude/CLAUDE.md` §4
+      defines `docs` as "documentation only") - not corrected, since
+      doing so would mean rewriting already-pushed commit history,
+      which this session's git-safety norms avoid without being
+      explicitly asked.
+
+      Full suite after fixes: 346 passed, 0 skipped, 0 failures (Ollama
+      recovered during this task, so every previously-skipped live
+      fixture ran too).
 - [ ] Background sync job for near-real-time index freshness (FR4)
 
 ## Phase 8 — Evaluation, Observability & Production Readiness

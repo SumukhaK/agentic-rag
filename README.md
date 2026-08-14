@@ -398,6 +398,27 @@ Shipped so far (`src/agentic_rag/api/`):
   asserts they stay equal); all 4 request/response models gained
   docstrings and per-field descriptions, previously entirely absent. 10
   new tests, full suite 283 passed, 0 failures.
+- **Self-review found real bugs in the fix meant to catch this class of
+  bug** — 7 finder angles converged independently on the same defect
+  cluster in the first `_custom_openapi` implementation: it dropped
+  FastAPI's own route-version cache invalidation while its docstring
+  falsely claimed to match it, hand-forwarded only 4 of the ~12 kwargs
+  FastAPI's real default forwards (silently dropping any future
+  `contact`/`license_info`/`tags`/`servers`), and did an unguarded dict
+  lookup that could `KeyError` and take `/openapi.json` down for the
+  *entire app* if the route ever changed shape. Fixed by capturing
+  FastAPI's own `app.openapi` bound method before overriding it and
+  delegating to it first — correct caching, full kwarg forwarding, and
+  invalidation all inherited for free instead of reimplemented by hand;
+  the 422 patch itself now uses `.get()` chains instead of indexing, so
+  a future route change skips the patch instead of crashing the schema.
+  Also fixed: the hardcoded `version="0.1.0"` now sourced via
+  `importlib.metadata.version(...)` (closing a real gap against this
+  repo's own "configuration lives in one place" rule); `HealthResponse`
+  moved into `schemas.py` to match every other model's location; the
+  public 422 description no longer leaks internal implementation
+  narration into the schema API consumers see. Full suite after fixes:
+  346 passed, 0 skipped, 0 failures.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

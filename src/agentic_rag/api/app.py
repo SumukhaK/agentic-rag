@@ -1,7 +1,7 @@
+import importlib.metadata
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.openapi.utils import get_openapi
 
 from agentic_rag.api.routers.health import router as health_router
 from agentic_rag.api.routers.query import QUERY_422_DESCRIPTION
@@ -10,46 +10,6 @@ from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
 from agentic_rag.orchestration.semantic_cache import SemanticCache
-
-
-def _custom_openapi(app: FastAPI) -> dict:
-    """Generate `app`'s OpenAPI schema, then correct `POST /query`'s 422
-    response description in place.
-
-    `/query` can return a 422 two different ways with two different
-    bodies (see `QUERY_422_DESCRIPTION`), but FastAPI only knows how to
-    auto-generate documentation for the request-validation-failure case.
-    The obvious fix - passing `responses={422: {"description": ...}}` on
-    the route decorator - doesn't merge with FastAPI's own auto-added 422
-    entry, it *replaces* it: the `content`/schema reference to
-    `HTTPValidationError` disappears, and since nothing else on this route
-    ever requests that reference, FastAPI stops registering the
-    `HTTPValidationError` component definition entirely - the response
-    goes from "documents one of two real shapes" to "documents neither."
-    Generating the correct schema first with `get_openapi()`, then only
-    editing the description text of the entry it already built correctly,
-    keeps the auto-generated `content`/component intact while still
-    surfacing the second shape.
-
-    Cached on `app.openapi_schema` the same way FastAPI's own default
-    `openapi()` method caches it - regenerating this on every `/openapi.json`
-    request would repeat the full schema walk for no benefit, since the
-    schema doesn't change after startup.
-    """
-    if app.openapi_schema:
-        return app.openapi_schema
-
-    schema = get_openapi(
-        title=app.title,
-        version=app.version,
-        description=app.description,
-        routes=app.routes,
-    )
-    schema["paths"]["/query"]["post"]["responses"]["422"]["description"] = (
-        QUERY_422_DESCRIPTION
-    )
-    app.openapi_schema = schema
-    return app.openapi_schema
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -96,10 +56,62 @@ def create_app(settings: Settings) -> FastAPI:
             "foul-language, and output-security screening. See "
             "docs/REQUIREMENTS.md for the full functional spec."
         ),
-        version="0.1.0",  # tracks pyproject.toml's [project].version - keep both in sync
+        version=importlib.metadata.version("agentic-rag"),
         lifespan=lifespan,
     )
     app.include_router(health_router)
     app.include_router(query_router)
-    app.openapi = lambda: _custom_openapi(app)
+
+    default_openapi = app.openapi
+
+    def _custom_openapi() -> dict:
+        """Patch `POST /query`'s 422 response description onto FastAPI's
+        own auto-generated schema, in place.
+
+        `/query` can return a 422 two different ways with two different
+        bodies (see `QUERY_422_DESCRIPTION`), but FastAPI only knows how
+        to auto-generate documentation for the request-validation-failure
+        case. The obvious fix - passing `responses={422: {...}}` on the
+        route decorator - doesn't merge with FastAPI's own auto-added 422
+        entry, it *replaces* it: the `content`/schema reference to
+        `HTTPValidationError` disappears, and since nothing else on the
+        route ever requests that reference, FastAPI stops registering the
+        `HTTPValidationError` component definition entirely - the response
+        goes from "documents one of two real shapes" to "documents
+        neither."
+
+        Delegates to `default_openapi` - the bound method FastAPI itself
+        assigned to `app.openapi` before this closure replaces it - rather
+        than reimplementing schema generation by hand. `default_openapi()`
+        already does the caching correctly (with route-version
+        invalidation, so a router registered later doesn't get silently
+        stuck out of a stale cached schema) and forwards every relevant
+        `FastAPI(...)` constructor field (`contact`, `license_info`,
+        `tags`, `servers`, ...) to `get_openapi()` - reimplementing either
+        of those by hand risks quietly drifting from FastAPI's own
+        behavior as it evolves, exactly the kind of inaccuracy this PR
+        exists to catch. Mutating the dict `default_openapi()` returns
+        also mutates what FastAPI cached on `app.openapi_schema` (dicts
+        are references, not copies), so this patch survives across calls
+        for free without this function needing to manage its own cache.
+
+        Looked up via `.get()` chains rather than direct `[...]`
+        indexing - if `/query`'s route shape ever changes such that
+        FastAPI stops auto-generating a 422 entry for it, this silently
+        skips the patch instead of raising and taking `/openapi.json`
+        down for the entire app, not just this one endpoint.
+        """
+        schema = default_openapi()
+        query_422 = (
+            schema.get("paths", {})
+            .get("/query", {})
+            .get("post", {})
+            .get("responses", {})
+            .get("422")
+        )
+        if query_422 is not None:
+            query_422["description"] = QUERY_422_DESCRIPTION
+        return schema
+
+    app.openapi = _custom_openapi
     return app

@@ -1,6 +1,7 @@
 import tomllib
 from pathlib import Path
 
+from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
 from agentic_rag.api.app import create_app
@@ -70,6 +71,32 @@ def test_query_422_response_still_documents_the_validation_error_schema(tmp_path
     schema_ref = response_422["content"]["application/json"]["schema"]["$ref"]
     assert schema_ref == "#/components/schemas/HTTPValidationError"
     assert "HTTPValidationError" in schema["components"]["schemas"]
+
+
+def test_openapi_schema_regenerates_when_a_route_is_added_after_the_first_call(tmp_path):
+    # The custom openapi() override must not cache more aggressively than
+    # FastAPI's own default implementation, which invalidates its cache
+    # when the route set changes. A naive `if app.openapi_schema: return
+    # app.openapi_schema` (no route-version check) would keep serving the
+    # first-generated schema forever, silently omitting any router
+    # attached afterward - delegating to FastAPI's own default openapi()
+    # avoids reimplementing that invalidation logic by hand.
+    app = create_app(_test_settings(tmp_path))
+    with TestClient(app) as client:
+        first = client.get("/openapi.json").json()
+        assert "/late-router" not in first["paths"]
+
+        late_router = APIRouter()
+
+        @late_router.get("/late-router")
+        def _late_route():
+            return {"ok": True}
+
+        app.include_router(late_router)
+
+        second = client.get("/openapi.json").json()
+
+    assert "/late-router" in second["paths"]
 
 
 def test_health_response_schema_reflects_the_actual_fixed_body(tmp_path):

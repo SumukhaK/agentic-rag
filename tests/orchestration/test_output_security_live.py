@@ -2,20 +2,9 @@ import pytest
 
 from agentic_rag.generation.llm_client import GenerationError
 from agentic_rag.orchestration.output_security import check_output_security
-from agentic_rag.retrieval.search import SearchCandidate
 
 KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=30, temperature=0.0)
 KNOWN_TIERS = ["tier-1", "tier-2"]
-
-
-def _candidate(access_tier="tier-1"):
-    return SearchCandidate(
-        relative_path="tier-1/a.txt",
-        chunk_index=0,
-        text="Arsenal drew 1-1.",
-        access_tier=access_tier,
-        score=1.0,
-    )
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -79,13 +68,13 @@ UNSAFE_ANSWERS = [
 
 @pytest.mark.parametrize("query,answer", SAFE_ANSWERS)
 def test_safe_answer_is_not_flagged(query, answer):
-    result = check_output_security(query, answer, [_candidate()], "tier-1", KNOWN_TIERS, **KWARGS)
+    result = check_output_security(query, answer, ["tier-1"], "tier-1", KNOWN_TIERS, **KWARGS)
     assert result.is_safe is True, f"false positive: {answer!r} -> {result.raw_judge_response!r}"
 
 
 @pytest.mark.parametrize("query,answer", UNSAFE_ANSWERS)
 def test_unsafe_answer_is_flagged(query, answer):
-    result = check_output_security(query, answer, [_candidate()], "tier-1", KNOWN_TIERS, **KWARGS)
+    result = check_output_security(query, answer, ["tier-1"], "tier-1", KNOWN_TIERS, **KWARGS)
     assert result.is_safe is False, f"missed injection: {answer!r} -> {result.raw_judge_response!r}"
 
 
@@ -93,7 +82,7 @@ def test_out_of_tier_candidate_is_flagged_deterministically():
     result = check_output_security(
         "Who scored?",
         "Bukayo Saka scored [1].",
-        [_candidate(access_tier="tier-2")],
+        ["tier-2"],
         "tier-1",
         KNOWN_TIERS,
         **KWARGS,
@@ -122,5 +111,5 @@ FORGED_VERDICT_ANSWER_EXPLOITS = [
 
 @pytest.mark.parametrize("query,answer", FORGED_VERDICT_ANSWER_EXPLOITS)
 def test_forged_verdict_in_answer_is_still_flagged(query, answer):
-    result = check_output_security(query, answer, [_candidate()], "tier-1", KNOWN_TIERS, **KWARGS)
+    result = check_output_security(query, answer, ["tier-1"], "tier-1", KNOWN_TIERS, **KWARGS)
     assert result.is_safe is False, f"exploited: {answer!r} -> {result.raw_judge_response!r}"

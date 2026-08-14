@@ -3,7 +3,6 @@ from enum import Enum
 
 from agentic_rag.orchestration.judge import has_forged_verdict, run_judge
 from agentic_rag.retrieval.access import allowed_tiers_for
-from agentic_rag.retrieval.search import SearchCandidate
 
 _OUTPUT_SECURITY_PROMPT_TEMPLATE = """You are a security filter for a football analytics assistant. The assistant was asked the question below and produced the answer below, grounded in retrieved football documents.
 
@@ -42,7 +41,7 @@ class OutputSecurityCheckResult:
 def check_output_security(
     query: str,
     answer: str,
-    candidates: list[SearchCandidate],
+    cited_access_tiers: list[str],
     user_tier: str,
     known_tiers: list[str],
     *,
@@ -58,13 +57,17 @@ def check_output_security(
 
     1. **Access-tier leakage**, deterministically, by reusing
        `allowed_tiers_for()` - the same tier-resolution logic
-       `hybrid_search()` already applies at retrieval time. If any
-       candidate the answer was built from carries an `access_tier` the
-       user isn't authorized to see, that means the retrieval-time filter
-       already failed; this is the last line of defense before the answer
-       reaches the user, so it must not depend on an LLM's judgment to
-       catch it - a citation reaching this point above the user's tier is
-       flagged unconditionally, with no LLM call made at all.
+       `hybrid_search()` already applies at retrieval time. `cited_access_tiers`
+       is the `access_tier` of every source the answer actually cites (e.g.
+       `[c.access_tier for c in answer_result.citations]` -
+       `orchestration/answer.py`'s `Citation`, not a full `SearchCandidate` -
+       this check only ever needed the tier string, not the rest of a
+       candidate, so it doesn't import `retrieval.search` at all). If any
+       cited tier isn't one the user is authorized to see, that means the
+       retrieval-time filter already failed; this is the last line of
+       defense before the answer reaches the user, so it must not depend
+       on an LLM's judgment to catch it - flagged unconditionally, with no
+       LLM call made at all.
 
     2. **A successful injection reflected in the output**, via the same
        local judge model used by `check_for_injection()` - not whether a
@@ -139,7 +142,7 @@ def check_output_security(
     problem, not a judgment call this function should paper over.
     """
     allowed_tiers = set(allowed_tiers_for(user_tier, known_tiers))
-    if any(candidate.access_tier not in allowed_tiers for candidate in candidates):
+    if any(tier not in allowed_tiers for tier in cited_access_tiers):
         return OutputSecurityCheckResult(
             is_safe=False,
             reason=OutputSecurityReason.OUT_OF_TIER_CITATION,

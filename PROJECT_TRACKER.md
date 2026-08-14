@@ -898,9 +898,89 @@ building unwired infrastructure to fill the slot.
       scope; the follow-up owns it), but did produce direct live evidence
       the bug is real and already affecting retrieval outcomes, not a
       hypothetical risk.
-- [ ] Compose `check_for_injection()` / `check_for_foul_language()` /
-      `check_output_security()` into `POST /query` — the "Phase 7's job"
-      deferred repeatedly throughout Phase 6.
+- [x] Compose `check_for_injection()` / `check_for_foul_language()` /
+      `check_output_security()` into `POST /query` — own PR,
+      `feat/wire-security-judges`. The "Phase 7's job" deferred repeatedly
+      throughout Phase 6.
+
+      **Input screening** (`_screen_input()`, new helper in
+      `api/routers/query.py`): runs `check_for_injection()` and
+      `check_for_foul_language()` **concurrently** via a thread pool - the
+      same pattern `hybrid_search()` already established for independent
+      Ollama-backed work, since neither check depends on the other's
+      result. Runs against the **raw** `payload.query`, before
+      `rewrite_query()` at all - screening a rewritten query would let a
+      malicious raw query reach `rewrite_query()`'s own unscreened LLM
+      call first. Injection flags return the single canonical
+      `CANNOT_ANSWER_MESSAGE` (REQUIREMENTS.md §8 rule 2) rather than a
+      distinct message - same "don't reveal which check caught it"
+      reasoning `check_output_security()` already documented. Foul
+      language flags return the distinct `FOUL_LANGUAGE_REFUSAL_MESSAGE`,
+      per that judge's own established rationale. Only the current turn's
+      `query` is screened, not the resent conversation history - each
+      prior turn was already screened as *its own* current query when it
+      was first sent; screening history again is a separate, unaddressed
+      concern, not silently assumed out of scope.
+
+      **Output screening**: `check_output_security()` runs after
+      `answer_with_cache()`, checked against the **rewritten** query (what
+      the answer was actually generated for) and `answer.text`. A flagged
+      answer is replaced with the canonical fallback and an empty citation
+      list - same reasoning as the input-screening injection case.
+
+      **A real interface gap discovered while wiring, fixed in the same
+      PR (tightly coupled, not bundled for convenience)**:
+      `check_output_security()` previously required
+      `candidates: list[SearchCandidate]`, but the API layer only has
+      `AnswerResult.citations: list[Citation]` (FR1's citation metadata,
+      `feat/query-citations`) - a different, smaller dataclass. Traced
+      through `check_output_security()`'s actual usage: the access-tier
+      check only ever reads `.access_tier` off each candidate, nothing
+      else. Simplified the parameter to `cited_access_tiers: list[str]`
+      directly - removes `output_security.py`'s dependency on
+      `retrieval.search.SearchCandidate` entirely (it never needed a
+      whole candidate, just a tier string), and the API layer now calls it
+      with `[c.access_tier for c in answer.citations]`.
+
+      **Live verification blocked by a local resource issue, not by this
+      diff**: the local Ollama server was returning `500` on every
+      `/api/generate` call while this PR was being built and reviewed -
+      confirmed via a direct `curl` to Ollama's own API, unrelated to any
+      Python code, root-caused to `llama-server reported out-of-memory...
+      unable to allocate Vulkan0 buffer` - the same class of local
+      GPU/memory exhaustion behind `test_rerank.py`'s ONNX allocation
+      failures elsewhere in this log. All 16 new/updated
+      `tests/api/test_query.py` cases and the full mocked suite pass
+      (0 failures); every Ollama-dependent live fixture skipped gracefully
+      via its existing `_require_ollama`-style fixture rather than
+      failing. Documented honestly rather than silently claimed as
+      verified - retry once Ollama recovers.
+
+      **Self-review found and fixed two real issues**: (1)
+      `check_output_security()` sat outside the `try/except
+      UnknownAccessTierError` block even though it independently calls
+      `allowed_tiers_for()` and can raise the same exception —
+      `answer_with_cache()`'s cache-hit path (`SemanticCache.get()`)
+      returns early without ever calling `allowed_tiers_for()`, so a tier
+      valid when a matching answer was cached, then later removed from
+      `Settings.access_tiers`, would skip validation on a cache hit and
+      reach `check_output_security()` unvalidated — raising there,
+      uncaught, an unhandled 500 instead of the documented 422. Both
+      calls now share one `try` block. (2) `check_output_security()` ran
+      unconditionally even for the canonical fallback answer, which
+      `generate_answer()` never attaches citations to and which is a
+      fixed, known-safe string — a pure wasted LLM round-trip on every
+      retrieval-insufficient query. Now skipped entirely when
+      `answer.text == CANNOT_ANSWER_MESSAGE`. Both covered by new
+      regression tests in `tests/api/test_query.py`.
+
+      Two review findings claiming CLAUDE.md violations ("max 40-line
+      functions," "routes must be thin, business logic in service
+      classes") were checked directly against this repo's actual
+      `.claude/CLAUDE.md` and found to **not exist there at all** —
+      REFUTED, not applied. A useful reminder that a finder agent's
+      claimed rule citation still needs verifying against the real file,
+      not trusted at face value.
 - [x] Reconsider `POST /query`'s sync `def` handler — **investigated and
       resolved: staying synchronous, deliberately, not deferred for lack
       of time.** Self-review flagged that the full call chain

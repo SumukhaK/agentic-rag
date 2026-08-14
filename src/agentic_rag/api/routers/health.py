@@ -1,9 +1,11 @@
 from fastapi import APIRouter
 
+from agentic_rag.api.schemas import HealthResponse
+
 router = APIRouter()
 
 
-@router.get("/health")
-def health() -> dict[str, str]:
+@router.get("/health", response_model=HealthResponse, summary="Liveness check")
+def health() -> HealthResponse:
     """Liveness check - the process is up and serving requests."""
-    return {"status": "ok"}
+    return HealthResponse(status="ok")

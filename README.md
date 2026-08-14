@@ -377,6 +377,48 @@ Shipped so far (`src/agentic_rag/api/`):
   Ollama `options` payload. No behavior change for any existing caller
   (full suite: 267 passed, 0 failures); a future caller simply can't
   reintroduce this bug a fourth time by omission.
+- **OpenAPI docs accuracy pass** — a real inaccuracy, not just missing
+  polish: `POST /query` can return a 422 two different ways with two
+  *different* bodies (a validation-error array vs. a plain-string
+  `{"detail": ...}` for an unrecognized `user_tier`), but the
+  auto-generated schema only ever documented the first shape. The obvious
+  fix (`responses={422: {"description": ...}}` on the route) turned out
+  to be a footgun caught by this task's own tests: it doesn't merge into
+  FastAPI's auto-added 422 entry, it *replaces* it, silently dropping the
+  `HTTPValidationError` schema reference and its component definition
+  entirely. Fixed properly via a custom `app.openapi()` override
+  (`fastapi.openapi.utils.get_openapi()` first, then edit the 422
+  description in place) — both shapes now documented, verified by a
+  regression test asserting the component still exists. Also: `/health`
+  now returns a typed `HealthResponse` (`status: Literal["ok"]`) instead
+  of an untyped `dict[str, str]` that documented a broader shape than the
+  endpoint can produce; app-level `title`/`description`/`version` added
+  (`version` was silently matching FastAPI's own hardcoded default by
+  coincidence, not because it tracked `pyproject.toml` — a test now
+  asserts they stay equal); all 4 request/response models gained
+  docstrings and per-field descriptions, previously entirely absent. 10
+  new tests, full suite 283 passed, 0 failures.
+- **Self-review found real bugs in the fix meant to catch this class of
+  bug** — 7 finder angles converged independently on the same defect
+  cluster in the first `_custom_openapi` implementation: it dropped
+  FastAPI's own route-version cache invalidation while its docstring
+  falsely claimed to match it, hand-forwarded only 4 of the ~12 kwargs
+  FastAPI's real default forwards (silently dropping any future
+  `contact`/`license_info`/`tags`/`servers`), and did an unguarded dict
+  lookup that could `KeyError` and take `/openapi.json` down for the
+  *entire app* if the route ever changed shape. Fixed by capturing
+  FastAPI's own `app.openapi` bound method before overriding it and
+  delegating to it first — correct caching, full kwarg forwarding, and
+  invalidation all inherited for free instead of reimplemented by hand;
+  the 422 patch itself now uses `.get()` chains instead of indexing, so
+  a future route change skips the patch instead of crashing the schema.
+  Also fixed: the hardcoded `version="0.1.0"` now sourced via
+  `importlib.metadata.version(...)` (closing a real gap against this
+  repo's own "configuration lives in one place" rule); `HealthResponse`
+  moved into `schemas.py` to match every other model's location; the
+  public 422 description no longer leaks internal implementation
+  narration into the schema API consumers see. Full suite after fixes:
+  346 passed, 0 skipped, 0 failures.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

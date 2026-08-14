@@ -73,7 +73,24 @@ def _screen_input(query: str, *, settings: Settings) -> str | None:
     return None
 
 
-@router.post("/query", response_model=QueryResponse)
+# The public-facing 422 response description for this route, applied onto
+# FastAPI's auto-generated schema by app.py's custom openapi() override
+# (see its docstring for why a route-level `responses={422: ...}` override
+# can't apply this safely). Kept to only what an API consumer needs to
+# know about the two response shapes, not the implementation history of
+# how this text gets attached to the schema.
+QUERY_422_DESCRIPTION = (
+    "Two distinct failure shapes share this status code: a request "
+    "validation failure (`HTTPValidationError` below - a `detail` array of "
+    "field errors, e.g. an empty `query`), or an unrecognized `user_tier` "
+    "that passed request validation but isn't a known access tier "
+    "(`{\"detail\": \"<message>\"}` - a plain string, not an array)."
+)
+
+
+@router.post(
+    "/query", response_model=QueryResponse, summary="Answer a grounded football question"
+)
 def query(
     payload: QueryRequest,
     settings: Settings = Depends(get_settings),

@@ -499,6 +499,14 @@ building unwired infrastructure to fill the slot.
       are in-range). **Implemented as** `check_output_security()`
       (`src/agentic_rag/orchestration/output_security.py`), returning
       `OutputSecurityCheckResult(is_safe, reason, raw_judge_response)`.
+      **Not wired into `generate_answer()`/`answer_with_cache()` or any
+      other caller yet** — same caveat as the injection judge above and
+      for the same reason: composition is a Phase 7 concern, and self-
+      review on this PR caught that the first version of this checklist
+      entry omitted this caveat while the injection judge's had it, an
+      inconsistency worth calling out on its own — a reader skimming only
+      the `[x]` and the 11/11 result could otherwise conclude answers are
+      screened end-to-end today, when none are.
       Two independent checks, not one:
       1. **Access-tier leakage**, deterministically — reuses
          `allowed_tiers_for()` (the same tier-resolution `hybrid_search()`
@@ -563,6 +571,25 @@ building unwired infrastructure to fill the slot.
       **11/11 correct** against real Ollama/`mistral`, skipped gracefully
       if unavailable.
 - [ ] Foul-language refusal
+- [ ] Make `check_for_injection()` deterministic (`temperature`) — the same
+      non-determinism bug fixed for `check_output_security()` above (PR
+      #30) was proven via that PR's live testing to affect
+      `check_for_injection()` too (they share `classify_injection_verdict()`
+      and the same underlying `generate()` call), but the code fix was
+      deliberately left out of that PR per the "each concern gets its own
+      PR" lesson from the secrets-audit PR's self-review — reviewers on PR
+      #30 pushed back that leaving this as PR-description prose with no
+      tracked checklist item risked it being forgotten, especially since
+      `check_for_injection()` (query-side screening) is likely to be wired
+      into a live path before `check_output_security()` (answer-side,
+      brand new) is. This line exists so that concern has a durable home.
+      `generate()`'s optional `temperature` parameter and
+      `Settings.judge_temperature` already exist and don't need to be
+      rebuilt — just threaded through `check_for_injection()` the same way
+      `check_output_security()` already does it, then re-verified live
+      (run the delimiter-confusion exploit prompt from
+      `tests/orchestration/test_injection_judge_live.py` several times in
+      a row at `temperature=0.0`, the way PR #30 did for its own version).
 
 ## Phase 7 — API & Delivery
 

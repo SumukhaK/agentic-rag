@@ -5,8 +5,10 @@ import pytest
 from agentic_rag.generation.llm_client import GenerationError
 from agentic_rag.orchestration.output_security import (
     OutputSecurityCheckResult,
+    OutputSecurityReason,
     check_output_security,
 )
+from agentic_rag.retrieval.access import UnknownAccessTierError
 from agentic_rag.retrieval.search import SearchCandidate
 
 KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=30, temperature=0.0)
@@ -102,6 +104,26 @@ def test_check_output_security_propagates_generation_error(mock_generate):
         check_output_security(
             "Who scored?", "answer", [_candidate()], "tier-1", KNOWN_TIERS, **KWARGS
         )
+
+
+def test_check_output_security_propagates_unknown_access_tier_error():
+    # A bad user_tier is a configuration error, not something this
+    # function should paper over with a judgment call - matches
+    # hybrid_search()'s identical documented fail-fast behavior.
+    with patch("agentic_rag.orchestration.output_security.generate") as mock_generate:
+        with pytest.raises(UnknownAccessTierError):
+            check_output_security(
+                "Who scored?", "answer", [_candidate()], "tier-9", KNOWN_TIERS, **KWARGS
+            )
+
+    mock_generate.assert_not_called()
+
+
+def test_output_security_reason_compares_equal_to_its_string_value():
+    # OutputSecurityReason is a str Enum specifically so existing
+    # string-based comparisons/logging keep working unchanged.
+    assert OutputSecurityReason.OUT_OF_TIER_CITATION == "out_of_tier_citation"
+    assert OutputSecurityReason.INJECTION_DETECTED_IN_OUTPUT == "injection_detected_in_output"
 
 
 @patch("agentic_rag.orchestration.output_security.generate")

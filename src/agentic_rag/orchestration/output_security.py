@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from enum import Enum
 
 from agentic_rag.generation.llm_client import generate
 from agentic_rag.orchestration.injection_judge import classify_injection_verdict
@@ -25,10 +26,15 @@ Answer: {answer}
 Verdict:"""
 
 
+class OutputSecurityReason(str, Enum):
+    OUT_OF_TIER_CITATION = "out_of_tier_citation"
+    INJECTION_DETECTED_IN_OUTPUT = "injection_detected_in_output"
+
+
 @dataclass(frozen=True)
 class OutputSecurityCheckResult:
     is_safe: bool
-    reason: str | None
+    reason: OutputSecurityReason | None
     raw_judge_response: str | None
 
 
@@ -70,12 +76,21 @@ def check_output_security(
        for injection-like content at ingestion time is a related but
        separate concern, not covered here.
 
-    `reason` is an internal, machine-readable code for logging/audit
-    (`"out_of_tier_citation"` or `"injection_detected_in_output"`), not
-    user-facing text - callers should still respond with the single
-    canonical fallback message (REQUIREMENTS.md §8 rule 2) on
-    `is_safe=False`, not a security-specific message, so as not to reveal
-    to a potential attacker which check actually caught them.
+    `reason` is an internal, machine-readable code, not user-facing text -
+    callers should still respond with the single canonical fallback
+    message (REQUIREMENTS.md §8 rule 2) on `is_safe=False`, not a
+    security-specific message, so as not to reveal to a potential attacker
+    which check actually caught them. It's a useful hook for logging/audit
+    *if* a caller chooses to log it - nothing in this codebase does that
+    yet (there is no logging infrastructure anywhere under `src/` at all);
+    that's Phase 8's explicit scope ("Logging/tracing across the
+    pipeline"), not solved here.
+
+    A bad `user_tier` (not present in `known_tiers`) raises
+    `UnknownAccessTierError` from `allowed_tiers_for()` rather than being
+    caught - deliberately, matching `hybrid_search()`'s identical
+    documented behavior: a bad access tier is a configuration error, not
+    something this function should paper over with a judgment call.
 
     The prompt was tuned live against real Ollama/`mistral` through
     several rounds during self-review, since the first version had real
@@ -89,7 +104,15 @@ def check_output_security(
     false positive - accepted as a known limitation of a small local
     model on a genuinely fuzzy classification task, not chased further,
     since realistic `generate_answer()` output (grounded, citation-based)
-    is unlikely to produce that phrasing organically.
+    is unlikely to produce that phrasing organically. A second, related
+    risk from the same root cause (the shared parser only inspects the
+    judge's *first* word): a verbose preamble before the actual verdict
+    (e.g. "Based on the criteria above, this is CLEAN") would read as
+    neither keyword and fail closed, misreading a genuinely safe answer as
+    unsafe. The prompt's "reply with ONLY one word" instruction and the
+    committed live fixture's passing results are the only defense against
+    this today - not eliminated, same as the delimiter-confusion
+    mitigation above.
 
     `temperature` is passed straight through to `generate()` and should be
     low (e.g. `Settings.judge_temperature`, default `0.0`) - discovered as
@@ -105,7 +128,9 @@ def check_output_security(
     allowed_tiers = set(allowed_tiers_for(user_tier, known_tiers))
     if any(candidate.access_tier not in allowed_tiers for candidate in candidates):
         return OutputSecurityCheckResult(
-            is_safe=False, reason="out_of_tier_citation", raw_judge_response=None
+            is_safe=False,
+            reason=OutputSecurityReason.OUT_OF_TIER_CITATION,
+            raw_judge_response=None,
         )
 
     prompt = _OUTPUT_SECURITY_PROMPT_TEMPLATE.format(query=query, answer=answer)
@@ -115,7 +140,9 @@ def check_output_security(
 
     if classify_injection_verdict(response):
         return OutputSecurityCheckResult(
-            is_safe=False, reason="injection_detected_in_output", raw_judge_response=response
+            is_safe=False,
+            reason=OutputSecurityReason.INJECTION_DETECTED_IN_OUTPUT,
+            raw_judge_response=response,
         )
 
     return OutputSecurityCheckResult(is_safe=True, reason=None, raw_judge_response=response)

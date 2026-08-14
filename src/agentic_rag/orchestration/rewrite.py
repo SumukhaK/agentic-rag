@@ -33,6 +33,7 @@ def rewrite_query(
     model: str,
     base_url: str,
     timeout: int,
+    temperature: float,
 ) -> str:
     """Rewrite `query` into a single, self-contained question given prior
     conversation turns, so retrieval doesn't need conversational context to
@@ -47,6 +48,20 @@ def rewrite_query(
     empty/whitespace-only "rewrite" - either way, a failed rewrite must
     not silently fall back to the raw query (or to an unusable empty one)
     without the caller knowing.
+
+    `temperature` is required (e.g. `Settings.rewrite_temperature`,
+    default `0.0`), matching this codebase's "no defaults on
+    config-mirroring parameters" convention. Unlike `decompose_query()`
+    (`decompose.py`), which sits inside `plan_and_retrieve()`'s retry loop
+    and deliberately needs *some* calls to vary, `rewrite_query()` is
+    called exactly once per turn with no retry - there's no mechanism here
+    that benefits from an inconsistent rewrite, only correctness to lose:
+    the same conversation should always resolve "it"/"them" to the same
+    self-contained question. Discovered as a real gap alongside
+    `generate_answer()`'s and `decompose_query()`'s identical bug
+    (`Settings.judge_temperature` for context) - this call sat unpinned
+    because it was never live-tested repeatedly until self-review of the
+    `generate_answer()` fix went looking for the same pattern elsewhere.
     """
     if not history:
         return query
@@ -54,7 +69,9 @@ def rewrite_query(
     prompt = _REWRITE_PROMPT_TEMPLATE.format(
         history=_format_history(history), query=query
     )
-    rewritten = generate(prompt, model=model, base_url=base_url, timeout=timeout).strip()
+    rewritten = generate(
+        prompt, model=model, base_url=base_url, timeout=timeout, temperature=temperature
+    ).strip()
 
     if not rewritten:
         raise GenerationError("the LLM returned an empty rewritten query")

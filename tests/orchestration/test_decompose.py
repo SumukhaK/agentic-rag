@@ -5,7 +5,7 @@ import pytest
 from agentic_rag.generation.llm_client import GenerationError
 from agentic_rag.orchestration.decompose import decompose_query
 
-KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=60)
+KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=60, temperature=0.0)
 
 
 @patch("agentic_rag.orchestration.decompose.generate")
@@ -76,6 +76,15 @@ def test_decompose_query_raises_when_the_llm_returns_nothing_usable(mock_generat
 
     with pytest.raises(GenerationError):
         decompose_query("Complex question", **KWARGS)
+
+
+@patch("agentic_rag.orchestration.decompose.generate")
+def test_decompose_query_passes_temperature_through_to_generate(mock_generate):
+    mock_generate.return_value = "Who won the match?"
+
+    decompose_query("Who won the match?", **KWARGS)
+
+    assert mock_generate.call_args.kwargs["temperature"] == 0.0
 
 
 @patch("agentic_rag.orchestration.decompose.generate")

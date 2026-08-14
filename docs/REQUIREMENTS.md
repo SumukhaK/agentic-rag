@@ -379,6 +379,10 @@ start at the same value.
   scored for them?" after a turn about an Arsenal-Chelsea match correctly
   rewrote to "Which players scored for Arsenal in their match against
   Chelsea?" — "them" and "it" both resolved from context.
+  Takes a required `temperature` (`Settings.rewrite_temperature`, default
+  `0.0`) — discovered as the same unpinned-temperature bug already found
+  in `generate_answer()`, fixed the same way: called once per turn with no
+  retry, so nothing benefits from an inconsistent rewrite.
 - **Sub-question decomposition**: a complex question may be split into
   sub-questions, each run through the retrieval pipeline independently.
   **Implemented as** `decompose_query()`
@@ -413,7 +417,24 @@ start at the same value.
   (`src/agentic_rag/orchestration/planning.py`) — each attempt fully
   re-decomposes the query (fresh LLM phrasing is the only thing that can
   plausibly change the result against a deterministic corpus and
-  embeddings), then retrieves + reranks per sub-question. "Sufficient" means
+  embeddings), then retrieves + reranks per sub-question.
+  **`decompose_query()`'s temperature is deliberately not a single pinned
+  value**, unlike `rewrite_query()`/`generate_answer()`: self-review found
+  `decompose_query()` had the identical unpinned-temperature bug (live-
+  confirmed: 3 identical calls produced 3 different sub-question pairs,
+  sometimes wrongly judging a retrievable query `sufficient=False` by
+  chance), but this docstring's own "fresh LLM phrasing is the only thing
+  that can plausibly change the result" already documented that the retry
+  loop *depends* on `decompose_query()` varying across attempts — pinning
+  it to `0.0` everywhere would have silently made every retry
+  deterministically repeat the same failed decomposition. Resolved as
+  escalating temperature per attempt: attempt 1 uses
+  `Settings.decompose_temperature` (default `0.0`, fixing the bug for the
+  common single-attempt case), every attempt after uses
+  `Settings.decompose_retry_temperature` (default `0.4`) to deliberately
+  seek different phrasing — turning the accidental randomness this
+  function always had into an intentional, documented retry strategy.
+  "Sufficient" means
   every sub-question has at least one candidate chunk after reranking — a
   coarse, retrieval-only signal, not an answer-quality judgment, since
   answer quality isn't knowable until generation exists (Phase 5).
@@ -622,6 +643,7 @@ Log of decisions made explicitly during planning, for traceability:
 | API app location | `src/agentic_rag/api/` | Consistent with this repo's established flat `src/agentic_rag/` layout (`ingestion/`, `embedding/`, `retrieval/`, `generation/`, `orchestration/`) — no new top-level packaging concept introduced for the API layer alone |
 | Multi-turn chat session model | Stateless — client resends full history each `POST /query` call | Simplest for the MVP; avoids a new persistence/session-store decision this early, consistent with this project's bias against speculative infrastructure. Revisit if a real chat UI needs server-side session state |
 | `POST /query`'s sync vs. async I/O | Stay synchronous — deferred, not fixed | Self-review of the `POST /query` PR flagged that the route handler and its full call chain (Ollama + Qdrant network I/O) are blocking, so FastAPI's default 40-thread pool becomes the concurrency ceiling instead of something async I/O could raise. Investigated rather than assumed worth fixing: (1) §2 states no concurrent-users/requests-per-second target — only corpus size and per-request latency; (2) embedded Qdrant (`qdrant_setup.get_client()`) is already single-process/on-disk-locked by design ("Docker isn't available in this dev environment"), so this whole app can't run multiple workers regardless of sync/async — the thread pool was never the binding constraint, single-process Qdrant already is; (3) the refactor is large and cross-cutting — async `generate()`/embedding clients, and async `rewrite_query`/`decompose_query`/`plan_and_retrieve`/`generate_answer`/`answer_with_cache`/`hybrid_search`, touching nearly every already-shipped module from Phases 2–6, for a benefit nothing in the spec asks for. Revisit if a real concurrent-load requirement is ever stated. |
+| `decompose_query()`'s temperature strategy | Escalating per attempt — `0.0` on the first `plan_and_retrieve()` attempt, a higher `decompose_retry_temperature` (default `0.4`) on every retry | Naively pinning to `0.0` everywhere (matching `generate_answer()`/`rewrite_query()`) would have silently defeated the retry loop's own documented purpose — it depends on `decompose_query()` varying across attempts to give a "fresh chance at different phrasing." A single non-zero value would have left the original live-confirmed bug (identical calls producing different, sometimes-wrong sufficiency verdicts) unfixed for the common first-attempt case. Escalating per attempt fixes the common case deterministically while keeping the retry loop's actual mechanism intact, as a deliberate strategy instead of accidental randomness. |
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 

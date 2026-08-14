@@ -924,6 +924,53 @@ building unwired infrastructure to fill the slot.
       nothing in the spec asks for. Recorded in
       `docs/REQUIREMENTS.md` §13's decision log. Revisit if a real
       concurrent-load requirement is ever stated.
+- [x] Pin temperature for `decompose_query()` and `rewrite_query()` — own
+      PR, `fix/decompose-rewrite-temperature`. Both called `generate()`
+      with no `temperature`, the identical bug already fixed for
+      `generate_answer()`, discovered via self-review of that fix.
+      Live-confirmed real before fixing: 3 identical calls to
+      `decompose_query()` produced 3 different sub-question pairs, and
+      testing `POST /query` end-to-end with this bug present showed it
+      already affecting retrieval outcomes, not just a theoretical risk
+      (see the `feat/query-citations` log entry above).
+
+      **`rewrite_query()` — pinned to `0.0`, same as `generate_answer()`.**
+      Called once per turn with no retry; nothing benefits from an
+      inconsistent rewrite, only correctness to lose. New
+      `Settings.rewrite_temperature` (default `0.0`).
+
+      **`decompose_query()` — deliberately NOT pinned to a single value.**
+      `plan_and_retrieve()`'s own docstring already documented that its
+      retry loop depends on `decompose_query()` varying across attempts
+      ("re-decomposing gives the LLM a fresh chance at different
+      phrasing") — pinning to `0.0` everywhere, matching the other two
+      fixes, would have silently made every retry deterministically
+      repeat the same failed decomposition, defeating the retry loop's
+      own stated purpose. Raised to the user rather than assumed: chose
+      **escalating temperature per attempt** — attempt 1 uses
+      `Settings.decompose_temperature` (default `0.0`, fixing the actual
+      bug for the common single-attempt case), every attempt after uses
+      `Settings.decompose_retry_temperature` (default `0.4`) to
+      deliberately seek a different phrasing. Turns what was accidental,
+      undocumented randomness into an intentional, documented retry
+      strategy. `plan_and_retrieve()` takes both as required parameters
+      and threads the right one to `decompose_query()` per attempt;
+      `answer_with_cache()` and `POST /query` thread both through from
+      `Settings`.
+
+      **Live-verified**: `decompose_query()` at `temperature=0.0` produced
+      the identical sub-question pair across 5 consecutive calls (was
+      non-deterministic before the fix); at `temperature=0.4`, results
+      varied across calls as intended (confirmed genuine, controlled
+      exploration is present, not just cosmetic). Re-running the exact
+      `sufficient=False`-every-time repro that originally found the bug
+      now consistently reproduces the *same* result run-to-run (was
+      flapping between different results before) — traced the residual
+      `sufficient=False` itself to an unrelated, pre-existing local
+      resource issue (the reranker model failing to load:
+      `ONNXRuntimeError: bad allocation`, the same environmental issue
+      behind `tests/retrieval/test_rerank.py`'s skips elsewhere in this
+      log), not to anything in this fix.
 - [ ] Reduce `answer_with_cache()`'s 19-parameter signature — self-review
       noted `POST /query` (its first real caller) hand-marshals 17
       individual `Settings` fields into keyword arguments at the one call

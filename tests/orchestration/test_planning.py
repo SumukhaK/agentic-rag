@@ -30,6 +30,8 @@ KWARGS = dict(
     retrieval_top_k=10,
     rerank_top_k=4,
     max_attempts=5,
+    decompose_temperature=0.0,
+    decompose_retry_temperature=0.4,
 )
 
 
@@ -78,6 +80,56 @@ def test_plan_and_retrieve_retries_when_a_sub_question_has_no_evidence(
     assert result.sufficient is True
     assert result.attempts_used == 2
     assert mock_decompose.call_count == 2
+
+
+@patch("agentic_rag.orchestration.planning.rerank")
+@patch("agentic_rag.orchestration.planning.hybrid_search")
+@patch("agentic_rag.orchestration.planning.decompose_query")
+def test_plan_and_retrieve_uses_decompose_temperature_on_the_first_attempt(
+    mock_decompose, mock_search, mock_rerank
+):
+    mock_decompose.return_value = ["Who won it?"]
+    mock_search.return_value = [_candidate()]
+    mock_rerank.return_value = [_candidate()]
+
+    plan_and_retrieve(**KWARGS)
+
+    assert mock_decompose.call_args.kwargs["temperature"] == 0.0
+
+
+@patch("agentic_rag.orchestration.planning.rerank")
+@patch("agentic_rag.orchestration.planning.hybrid_search")
+@patch("agentic_rag.orchestration.planning.decompose_query")
+def test_plan_and_retrieve_uses_decompose_retry_temperature_on_later_attempts(
+    mock_decompose, mock_search, mock_rerank
+):
+    # A retry only has a chance of succeeding if it explores a genuinely
+    # different phrasing - retrying with the same deterministic
+    # decomposition would just reproduce the same "insufficient" result.
+    mock_decompose.side_effect = [["Who won it?"], ["Who won the match?"]]
+    mock_search.side_effect = [[], [_candidate()]]
+    mock_rerank.return_value = [_candidate()]
+
+    plan_and_retrieve(**KWARGS)
+
+    first_call, second_call = mock_decompose.call_args_list
+    assert first_call.kwargs["temperature"] == 0.0
+    assert second_call.kwargs["temperature"] == 0.4
+
+
+@patch("agentic_rag.orchestration.planning.rerank")
+@patch("agentic_rag.orchestration.planning.hybrid_search")
+@patch("agentic_rag.orchestration.planning.decompose_query")
+def test_plan_and_retrieve_uses_decompose_retry_temperature_for_every_attempt_after_the_first(
+    mock_decompose, mock_search, mock_rerank
+):
+    mock_decompose.return_value = ["Who won it?"]
+    mock_search.return_value = []
+
+    plan_and_retrieve(**{**KWARGS, "max_attempts": 3})
+
+    temperatures = [call.kwargs["temperature"] for call in mock_decompose.call_args_list]
+    assert temperatures == [0.0, 0.4, 0.4]
 
 
 @patch("agentic_rag.orchestration.planning.rerank")

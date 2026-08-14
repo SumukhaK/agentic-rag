@@ -322,6 +322,21 @@ Shipped so far (`src/agentic_rag/api/`):
   `docs/REQUIREMENTS.md`, and embedded Qdrant is already single-process by
   design regardless of sync/async — the thread pool was never the actual
   binding constraint. See `docs/REQUIREMENTS.md` §13's decision log.
+- **`decompose_query()`/`rewrite_query()`: pinned temperature, fixing the
+  same bug class a second and third time** — self-review of the
+  `generate_answer()` fix found both call `generate()` with no
+  `temperature`. `rewrite_query()` is pinned to `0.0`, same as
+  `generate_answer()` (called once per turn, nothing benefits from an
+  inconsistent rewrite). `decompose_query()` needed a different answer:
+  `plan_and_retrieve()`'s retry loop deliberately depends on it varying
+  across attempts ("a fresh chance at different phrasing"), so pinning it
+  to `0.0` everywhere would have silently defeated the retry loop itself.
+  Chose **escalating temperature per attempt** instead — `0.0` on attempt
+  1 (fixes the actual bug for the common case), a deliberately higher
+  `decompose_retry_temperature` (default `0.4`) on every retry, turning
+  accidental randomness into an intentional retry strategy. Live-verified:
+  5 identical decompositions at `temperature=0.0` (was non-deterministic
+  before), genuine variation at `0.4`.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

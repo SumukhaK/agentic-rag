@@ -5,7 +5,7 @@ import pytest
 from agentic_rag.generation.llm_client import GenerationError
 from agentic_rag.orchestration.rewrite import ConversationTurn, rewrite_query
 
-KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=60)
+KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=60, temperature=0.0)
 
 
 @patch("agentic_rag.orchestration.rewrite.generate")
@@ -42,6 +42,16 @@ def test_rewrite_query_returns_the_llm_response_stripped(mock_generate):
     result = rewrite_query(history, "Who won it?", **KWARGS)
 
     assert result == "What was the result of the match?"
+
+
+@patch("agentic_rag.orchestration.rewrite.generate")
+def test_rewrite_query_passes_temperature_through_to_generate(mock_generate):
+    mock_generate.return_value = "What was the result of the match?"
+    history = [ConversationTurn(user_query="q", assistant_answer="a")]
+
+    rewrite_query(history, "Who won it?", **KWARGS)
+
+    assert mock_generate.call_args.kwargs["temperature"] == 0.0
 
 
 @patch("agentic_rag.orchestration.rewrite.generate")

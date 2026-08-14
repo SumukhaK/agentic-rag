@@ -290,3 +290,28 @@ def test_settings_generation_temperature_overridable_from_env(monkeypatch):
     settings = Settings()
 
     assert settings.generation_temperature == 0.3
+
+
+def test_settings_defaults_rewrite_and_decompose_temperatures(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    for key in ("REWRITE_TEMPERATURE", "DECOMPOSE_TEMPERATURE", "DECOMPOSE_RETRY_TEMPERATURE"):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = Settings()
+
+    assert settings.rewrite_temperature == 0.0
+    assert settings.decompose_temperature == 0.0
+    assert settings.decompose_retry_temperature == 0.4
+
+
+def test_settings_rewrite_and_decompose_temperatures_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("REWRITE_TEMPERATURE", "0.1")
+    monkeypatch.setenv("DECOMPOSE_TEMPERATURE", "0.2")
+    monkeypatch.setenv("DECOMPOSE_RETRY_TEMPERATURE", "0.6")
+
+    settings = Settings()
+
+    assert settings.rewrite_temperature == 0.1
+    assert settings.decompose_temperature == 0.2
+    assert settings.decompose_retry_temperature == 0.6

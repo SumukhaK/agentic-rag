@@ -22,8 +22,13 @@ class InjectionCheckResult:
     raw_response: str
 
 
-def _classify(response: str) -> bool:
-    """Fail-closed classification from the judge's raw response.
+def classify_injection_verdict(response: str) -> bool:
+    """Fail-closed classification from an INJECTION/CLEAN judge's raw
+    response - shared by `check_for_injection` (this module) and
+    `check_output_security` (`output_security.py`), which asks a
+    differently-worded question of the same judge model but expects the
+    identical single-word answer shape and needs the identical parsing
+    safety.
 
     Only the FIRST word is inspected, not a substring search across the
     whole response - a whole-response search misfires two ways: "unclean"
@@ -75,4 +80,6 @@ def check_for_injection(query: str, *, model: str, base_url: str, timeout: int) 
     prompt = _INJECTION_JUDGE_PROMPT_TEMPLATE.format(query=query)
     response = generate(prompt, model=model, base_url=base_url, timeout=timeout)
 
-    return InjectionCheckResult(is_injection=_classify(response), raw_response=response)
+    return InjectionCheckResult(
+        is_injection=classify_injection_verdict(response), raw_response=response
+    )

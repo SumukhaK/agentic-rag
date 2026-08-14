@@ -44,6 +44,40 @@ def test_generate_calls_the_ollama_generate_endpoint_with_model_and_prompt(mock_
 
 
 @patch("agentic_rag.generation.llm_client.requests.post")
+def test_generate_omits_options_when_temperature_is_not_given(mock_post):
+    mock_post.return_value = _mock_response(body={"response": "ok"})
+
+    generate("Say hello.", model="mistral", base_url="http://localhost:11434", timeout=45)
+
+    _, kwargs = mock_post.call_args
+    assert "options" not in kwargs["json"]
+
+
+@patch("agentic_rag.generation.llm_client.requests.post")
+def test_generate_passes_temperature_through_to_ollama_options(mock_post):
+    mock_post.return_value = _mock_response(body={"response": "ok"})
+
+    generate(
+        "Say hello.",
+        model="mistral",
+        base_url="http://localhost:11434",
+        timeout=45,
+        temperature=0.0,
+    )
+
+    mock_post.assert_called_once_with(
+        "http://localhost:11434/api/generate",
+        json={
+            "model": "mistral",
+            "prompt": "Say hello.",
+            "stream": False,
+            "options": {"temperature": 0.0},
+        },
+        timeout=45,
+    )
+
+
+@patch("agentic_rag.generation.llm_client.requests.post")
 def test_generate_raises_generation_error_when_ollama_is_unreachable(mock_post):
     mock_post.side_effect = requests.ConnectionError("connection refused")
 

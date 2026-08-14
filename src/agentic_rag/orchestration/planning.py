@@ -116,6 +116,8 @@ def plan_and_retrieve(
     retrieval_top_k: int,
     rerank_top_k: int,
     max_attempts: int,
+    decompose_temperature: float,
+    decompose_retry_temperature: float,
 ) -> PlanningResult:
     """Decompose `query`, retrieve+rerank evidence for every sub-question,
     and retry (re-decomposing from scratch) up to `max_attempts` times if
@@ -130,6 +132,24 @@ def plan_and_retrieve(
     that can plausibly change the result for a deterministic corpus and
     embeddings - retrying the identical sub-question against the same
     index would just return the same nothing.
+
+    `decompose_temperature` (attempt 1) vs. `decompose_retry_temperature`
+    (every attempt after) is a deliberate split, not two arbitrary knobs:
+    self-review of `generate_answer()`'s temperature fix found
+    `decompose_query()` had the identical unpinned-temperature bug, but
+    naively pinning it to `0.0` everywhere (matching `generate_answer()`/
+    `rewrite_query()`) would have silently defeated this retry loop's own
+    stated purpose above - a deterministic `decompose_query()` retried
+    with the exact same input just reproduces the exact same
+    "insufficient" result, forever, for any query that only fails because
+    of *how* it got decomposed. So attempt 1 stays low/deterministic
+    (`decompose_temperature`, matching the live-tested need: identical
+    calls at Ollama's default temperature produced different sub-question
+    pairs, sometimes wrongly judging a retrievable query `sufficient=False`
+    by chance) and every retry deliberately uses a higher
+    `decompose_retry_temperature` to actually explore different phrasing -
+    turning what was accidental, undocumented randomness into an
+    intentional retry strategy.
 
     A fixed cutoff on the cross-encoder's rerank score was tried as a
     tighter "is this actually relevant" signal and rejected: live-tested
@@ -171,6 +191,9 @@ def plan_and_retrieve(
                 model=generation_model,
                 base_url=ollama_base_url,
                 timeout=generation_timeout_seconds,
+                temperature=(
+                    decompose_temperature if attempt == 1 else decompose_retry_temperature
+                ),
             )
             outcomes = [
                 _retrieve_outcome(

@@ -28,3 +28,6 @@ class Settings(BaseSettings):
     semantic_cache_ttl_seconds: float = 300.0
     judge_temperature: float = 0.0
     generation_temperature: float = 0.0
+    rewrite_temperature: float = 0.0
+    decompose_temperature: float = 0.0
+    decompose_retry_temperature: float = 0.4

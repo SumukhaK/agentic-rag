@@ -19,7 +19,9 @@ def _clean_line(line: str) -> str:
     return _LIST_MARKER_RE.sub("", line.strip())
 
 
-def decompose_query(query: str, *, model: str, base_url: str, timeout: int) -> list[str]:
+def decompose_query(
+    query: str, *, model: str, base_url: str, timeout: int, temperature: float
+) -> list[str]:
     """Break `query` into independently-answerable sub-questions, one per
     line of the LLM's response, with common list markers (numbering,
     bullets) stripped in case the model ignores the "no numbering"
@@ -36,9 +38,26 @@ def decompose_query(query: str, *, model: str, base_url: str, timeout: int) -> l
     response) - a decomposition that silently produces zero sub-questions
     would make anything that plans off the result act as if there were
     nothing left to retrieve, without any error to explain why.
+
+    `temperature` is required (e.g. `Settings.decompose_temperature` /
+    `Settings.decompose_retry_temperature` - see `plan_and_retrieve()`'s
+    docstring, `planning.py`) with no default, matching this codebase's
+    "no defaults on config-mirroring parameters" convention. Unlike
+    `generate_answer()`/`rewrite_query()`, this call's ideal temperature
+    is *not* always `0.0`: `plan_and_retrieve()` deliberately calls this
+    function with a low temperature on the first attempt (best-effort
+    determinism - live-tested to matter: 3 identical calls at Ollama's
+    default temperature produced 3 different sub-question pairs, one of
+    which caused a query a single decomposition answers correctly to be
+    misjudged `sufficient=False`) and a higher temperature on retries
+    (retrying with the *same* deterministic decomposition would just
+    reproduce the same "insufficient" result - a retry only has a chance
+    of succeeding if it explores a genuinely different phrasing).
     """
     prompt = _DECOMPOSE_PROMPT_TEMPLATE.format(query=query)
-    response = generate(prompt, model=model, base_url=base_url, timeout=timeout)
+    response = generate(
+        prompt, model=model, base_url=base_url, timeout=timeout, temperature=temperature
+    )
 
     sub_questions = [
         cleaned

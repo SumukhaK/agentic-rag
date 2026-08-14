@@ -141,6 +141,8 @@ def answer_with_cache(
     generation_model: str,
     generation_timeout_seconds: int,
     generation_temperature: float,
+    decompose_temperature: float,
+    decompose_retry_temperature: float,
     known_tiers: list[str],
     retrieval_top_k: int,
     rerank_top_k: int,
@@ -190,6 +192,10 @@ def answer_with_cache(
     `generation_temperature` is threaded straight through to
     `generate_answer()` - see that function's docstring for why it's
     required and a separate setting from the judges' `judge_temperature`.
+    `decompose_temperature`/`decompose_retry_temperature` are threaded
+    straight through to `plan_and_retrieve()` - see its docstring
+    (`planning.py`) for why decomposition needs two temperatures, not one,
+    unlike every other pinned-temperature call in this codebase.
 
     Returns the full `AnswerResult` (text + citations) on both the cache-hit
     and cache-miss paths - see `SemanticCache`'s docstring for why a cache
@@ -226,6 +232,8 @@ def answer_with_cache(
         reranker_model=reranker_model,
         generation_model=generation_model,
         generation_timeout_seconds=generation_timeout_seconds,
+        decompose_temperature=decompose_temperature,
+        decompose_retry_temperature=decompose_retry_temperature,
         user_tier=user_tier,
         known_tiers=known_tiers,
         retrieval_top_k=retrieval_top_k,

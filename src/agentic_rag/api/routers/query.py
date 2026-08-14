@@ -52,6 +52,7 @@ def query(
         model=settings.generation_model,
         base_url=settings.ollama_base_url,
         timeout=settings.generation_timeout_seconds,
+        temperature=settings.rewrite_temperature,
     )
 
     try:
@@ -70,6 +71,8 @@ def query(
             generation_model=settings.generation_model,
             generation_timeout_seconds=settings.generation_timeout_seconds,
             generation_temperature=settings.generation_temperature,
+            decompose_temperature=settings.decompose_temperature,
+            decompose_retry_temperature=settings.decompose_retry_temperature,
             known_tiers=settings.access_tiers,
             retrieval_top_k=settings.retrieval_top_k_candidates,
             rerank_top_k=settings.rerank_top_k,

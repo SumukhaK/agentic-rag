@@ -9,10 +9,14 @@ dependencies = [
     "requests>=2.31",
     "qdrant-client>=1.12",
     "fastembed>=0.4",
+    "fastapi>=0.141.1",
+    "uvicorn[standard]>=0.52.3",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
+    "httpx2>=2.10.0",
     "pytest>=8.0",
 ]
 

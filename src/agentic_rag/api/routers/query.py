@@ -73,7 +73,20 @@ def _screen_input(query: str, *, settings: Settings) -> str | None:
     return None
 
 
-@router.post("/query", response_model=QueryResponse)
+QUERY_422_DESCRIPTION = (
+    "Two distinct failure shapes share this status code: a request "
+    "validation failure (`HTTPValidationError` below - a `detail` array of "
+    "field errors, e.g. an empty `query`), or an unrecognized `user_tier` "
+    "that passed request validation but isn't a known access tier "
+    "(`{\"detail\": \"<message>\"}` - a plain string, not an array). "
+    "`api/app.py`'s custom `openapi()` rewrites this response's default "
+    "\"Validation Error\" description to this text - see its docstring "
+    "for why a route-level `responses={422: ...}` override can't do this "
+    "safely."
+)
+
+
+@router.post("/query", response_model=QueryResponse, summary="Answer a grounded football question")
 def query(
     payload: QueryRequest,
     settings: Settings = Depends(get_settings),

@@ -1079,7 +1079,56 @@ building unwired infrastructure to fill the slot.
       not at import time. Consider accepting a config object (or
       `Settings` itself) instead. Not addressed here — touches
       already-merged Phase 5 code, not `POST /query`'s to redesign alone.
-- [ ] OpenAPI docs kept accurate
+- [x] OpenAPI docs kept accurate — own PR, `feat/openapi-docs-accuracy`.
+      Neither `docs/REQUIREMENTS.md` nor this repo's `.claude/CLAUDE.md`
+      mandate a specific error-response shape or a standalone
+      `docs/api.md` (checked directly - both are silent on this), so
+      scope stayed to what the task title actually says: making the
+      FastAPI-auto-generated schema (`/docs`, `/openapi.json`) match
+      reality, not inventing new requirements.
+
+      **A real inaccuracy, not just missing polish**: `POST /query` can
+      return a 422 two different ways with two *different* bodies -
+      FastAPI's own request-validation failure (`HTTPValidationError`, a
+      `detail` array of field errors) or `UnknownAccessTierError`
+      (`{"detail": "<message>"}`, a plain string) - but the
+      auto-generated schema only ever documented the first shape. A
+      client trusting the schema to always be an array would break
+      parsing the second. Fixing this the obvious way -
+      `responses={422: {"description": ...}}` on the route decorator -
+      turned out to be a genuine footgun, caught via this task's own
+      tests: FastAPI doesn't merge a route-level `responses=` override
+      into its auto-added 422 entry, it *replaces* it - the
+      `content`/schema reference disappeared, and since nothing else on
+      the route requested that reference anymore, the
+      `HTTPValidationError` component definition itself stopped being
+      generated. The fix went from "documents one of two shapes" to
+      "documents neither." Corrected by generating the schema fully
+      first (`fastapi.openapi.utils.get_openapi()`, the same call
+      FastAPI's own default `openapi()` uses internally) and only then
+      editing the 422 entry's `description` text in place - `app.py`'s
+      new `_custom_openapi()`, wired in via `app.openapi = lambda: ...`.
+      A regression test locks in that both `content` and the
+      `HTTPValidationError` component survive.
+
+      **Also fixed**: `/health`'s untyped `dict[str, str]` return
+      documented a broader shape (any string keys/values) than the
+      endpoint can actually produce (always exactly `{"status": "ok"}`)
+      - replaced with a typed `HealthResponse` model
+      (`status: Literal["ok"]`). App-level `title`/`description`/
+      `version` added (`version` was silently matching FastAPI's own
+      hardcoded `"0.1.0"` default by coincidence, not because anything
+      linked it to `pyproject.toml` - a version bump there would have
+      gone unnoticed forever; a new test asserts the two stay equal so
+      drift is a test failure, not a silent lie). All 4 request/response
+      models (`QueryRequest`, `QueryResponse`, `CitationModel`,
+      `ConversationTurnModel`) gained class docstrings and per-field
+      `description`s, which were entirely absent before - Swagger UI
+      showed bare field names with no explanation of what any of them
+      meant or when `history` could be omitted.
+
+      10 new tests (`tests/api/test_app.py`, `tests/api/test_schemas.py`).
+      Full suite: 283 passed, 0 failures.
 - [ ] Background sync job for near-real-time index freshness (FR4)
 
 ## Phase 8 — Evaluation, Observability & Production Readiness

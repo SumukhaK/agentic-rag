@@ -132,6 +132,7 @@ def answer_with_cache(
     reranker_model: str,
     generation_model: str,
     generation_timeout_seconds: int,
+    generation_temperature: float,
     known_tiers: list[str],
     retrieval_top_k: int,
     rerank_top_k: int,
@@ -177,6 +178,10 @@ def answer_with_cache(
     hypothetical. The answer's own content is the more direct signal for
     "this is actually a non-answer" than the signal that led to generating
     it in the first place.
+
+    `generation_temperature` is threaded straight through to
+    `generate_answer()` - see that function's docstring for why it's
+    required and a separate setting from the judges' `judge_temperature`.
     """
     query_embedding = embed_query_dense(
         query,
@@ -220,6 +225,7 @@ def answer_with_cache(
         model=generation_model,
         base_url=ollama_base_url,
         timeout=generation_timeout_seconds,
+        temperature=generation_temperature,
     )
 
     if planning_result.sufficient and CANNOT_ANSWER_MESSAGE not in answer:

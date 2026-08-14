@@ -317,6 +317,21 @@ a source that doesn't exist, is replaced with `CANNOT_ANSWER_MESSAGE` — a
 fabricated citation is worse than none, since it carries false authority
 the reader has no way to detect on their own.
 
+**Deterministic by requirement, not just by preference**: `generate_answer()`
+takes a required `temperature` (`Settings.generation_temperature`, default
+`0.0`) — discovered as a real gap once Phase 7's `POST /query` became the
+first real caller to exercise this function repeatedly: the identical,
+already-`sufficient` `PlanningResult` produced the correct cited answer on
+2 of 3 identical calls and the "I do not know" fallback on the third at
+Ollama's default (non-zero) temperature. This is a *correctness* bug against
+rule 1/rule 2 above, not a phrasing-variety nicety — re-verified with 5
+identical calls at `temperature=0.0` producing the correct, byte-for-byte
+identical answer every time. A separate setting from the Phase 6 judges'
+`Settings.judge_temperature`, not a reuse of it: a judge's single-word
+verdict has no reason to vary, but a natural-language answer's phrasing
+plausibly could, so the two are free to diverge later even though they
+start at the same value.
+
 ## 9. Functional Requirements
 
 | ID | Requirement |

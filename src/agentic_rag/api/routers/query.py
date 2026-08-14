@@ -68,6 +68,7 @@ def query(
             reranker_model=settings.reranker_model,
             generation_model=settings.generation_model,
             generation_timeout_seconds=settings.generation_timeout_seconds,
+            generation_temperature=settings.generation_temperature,
             known_tiers=settings.access_tiers,
             retrieval_top_k=settings.retrieval_top_k_candidates,
             rerank_top_k=settings.rerank_top_k,

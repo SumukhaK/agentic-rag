@@ -27,3 +27,4 @@ class Settings(BaseSettings):
     semantic_cache_similarity_threshold: float = 0.95
     semantic_cache_ttl_seconds: float = 300.0
     judge_temperature: float = 0.0
+    generation_temperature: float = 0.0

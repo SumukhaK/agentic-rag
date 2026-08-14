@@ -827,6 +827,24 @@ building unwired infrastructure to fill the slot.
       own follow-up rather than fixed here (out of this PR's scope; not
       something the API layer introduced or can fix by itself).
 
+      **Fixed** (own PR, `fix/generation-answer-temperature`):
+      `generate_answer()` now takes a required `temperature: float`
+      keyword argument, threaded through `answer_with_cache()`'s new
+      `generation_temperature` parameter from a new
+      `Settings.generation_temperature` (default `0.0`) — a **separate**
+      setting from `judge_temperature`, not a reuse of it, since the
+      tradeoff differs: a judge's single-word verdict has no reason to
+      vary, but a natural-language answer's phrasing plausibly could. It
+      defaults to the same `0.0` anyway because this isn't just a style
+      question here — it's a correctness bug, confirmed live. Re-verified
+      with the exact repro that found the bug: the identical, already-
+      `sufficient` `PlanningResult` run through `generate_answer()` 5
+      times at `temperature=0.0` produced the correct, byte-for-byte
+      identical cited answer every time (`" Bukayo Saka [1] and Martin
+      Odegaard [1] scored for Arsenal in the derby."`), where the same
+      repro at Ollama's default temperature had produced the wrong
+      fallback 1 time in 3.
+
       **Self-review found and fixed two real validation gaps**: (1) an
       unknown `user_tier` (e.g. a typo) reached `answer_with_cache()` →
       `allowed_tiers_for()` and raised `UnknownAccessTierError` unhandled,

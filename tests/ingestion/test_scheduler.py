@@ -1,5 +1,7 @@
 import asyncio
 import os
+import threading
+import time
 from unittest.mock import patch
 
 import pytest
@@ -43,6 +45,7 @@ def _settings(corpus, qdrant_path) -> Settings:
         qdrant_storage_path=qdrant_path,
         qdrant_collection_name=COLLECTION,
         sparse_embedding_model=SPARSE_MODEL,
+        sync_snapshot_path=qdrant_path.parent / "sync_snapshot.json",
         _env_file=None,
     )
 
@@ -80,6 +83,7 @@ def test_run_sync_cycle_indexes_a_new_document(mock_embed_texts, tmp_path):
     assert result.deleted == []
     assert result.ingestion_failures == []
     assert result.indexing_failures == []
+    assert result.deletion_failures == []
     assert _count_points_for(client, TIER_1_A) == 1
 
 
@@ -145,6 +149,29 @@ def test_run_sync_cycle_isolates_an_ingestion_failure_from_indexing(
     assert [f.relative_path for f in result.ingestion_failures] == ["bad.txt"]
 
 
+def test_run_sync_cycle_retries_a_persistently_failing_ingestion_on_every_cycle(tmp_path):
+    # A file that fails ingestion (e.g. an untagged path) must not be
+    # silently "seen" and dropped after the first cycle - sync_folder()'s
+    # own current_snapshot is computed purely from disk state, with no
+    # idea the file's ingestion failed, so naively carrying it forward
+    # unmodified would make diff_snapshots() stop reporting it as changed
+    # forever, even though nothing about it was ever actually resolved.
+    corpus = _corpus(tmp_path)
+    (corpus / "bad.txt").write_text("no tier folder")
+    client = _client(tmp_path / "qdrant")
+    settings = _settings(corpus, tmp_path / "qdrant")
+
+    first, first_snapshot = run_sync_cycle(
+        settings=settings, client=client, previous_snapshot={}
+    )
+    second, _ = run_sync_cycle(
+        settings=settings, client=client, previous_snapshot=first_snapshot
+    )
+
+    assert [f.relative_path for f in first.ingestion_failures] == ["bad.txt"]
+    assert [f.relative_path for f in second.ingestion_failures] == ["bad.txt"]
+
+
 @patch("agentic_rag.ingestion.scheduler.index_document")
 def test_run_sync_cycle_isolates_an_indexing_failure_from_other_documents(
     mock_index_document, tmp_path
@@ -165,6 +192,30 @@ def test_run_sync_cycle_isolates_an_indexing_failure_from_other_documents(
     assert result.indexed == [TIER_1_A]
     assert [f.relative_path for f in result.indexing_failures] == [TIER_1_B]
     assert "embedding boom" in result.indexing_failures[0].reason
+
+
+@patch("agentic_rag.ingestion.scheduler.index_document")
+def test_run_sync_cycle_retries_a_failed_document_on_the_next_cycle(
+    mock_index_document, tmp_path
+):
+    corpus = _corpus(tmp_path)
+    (corpus / "tier-1").mkdir()
+    (corpus / "tier-1" / "a.txt").write_text("Arsenal drew 1-1.")
+    mock_index_document.side_effect = RuntimeError("embedding boom")
+    client = _client(tmp_path / "qdrant")
+    settings = _settings(corpus, tmp_path / "qdrant")
+
+    first, first_snapshot = run_sync_cycle(
+        settings=settings, client=client, previous_snapshot={}
+    )
+    # Nothing on disk changes between cycles - only the failure itself.
+    second, _ = run_sync_cycle(
+        settings=settings, client=client, previous_snapshot=first_snapshot
+    )
+
+    assert [f.relative_path for f in first.indexing_failures] == [TIER_1_A]
+    assert [f.relative_path for f in second.indexing_failures] == [TIER_1_A]
+    assert mock_index_document.call_count == 2
 
 
 @patch("agentic_rag.ingestion.scheduler.delete_document")
@@ -192,8 +243,108 @@ def test_run_sync_cycle_isolates_a_deletion_failure_from_other_deletions(
     )
 
     assert result.deleted == [TIER_1_A]
-    assert [f.relative_path for f in result.indexing_failures] == [TIER_1_B]
-    assert "qdrant boom" in result.indexing_failures[0].reason
+    assert [f.relative_path for f in result.deletion_failures] == [TIER_1_B]
+    assert "qdrant boom" in result.deletion_failures[0].reason
+
+
+@patch("agentic_rag.ingestion.scheduler.delete_document")
+@patch("agentic_rag.indexing.upsert.embed_texts")
+def test_run_sync_cycle_retries_a_failed_deletion_on_the_next_cycle(
+    mock_embed_texts, mock_delete_document, tmp_path
+):
+    corpus = _corpus(tmp_path)
+    (corpus / "tier-1").mkdir()
+    file_path = corpus / "tier-1" / "a.txt"
+    file_path.write_text("Arsenal drew 1-1.")
+    mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
+    client = _client(tmp_path / "qdrant")
+    settings = _settings(corpus, tmp_path / "qdrant")
+    _, first_snapshot = run_sync_cycle(settings=settings, client=client, previous_snapshot={})
+
+    file_path.unlink()
+    mock_delete_document.side_effect = RuntimeError("qdrant boom")
+
+    second, second_snapshot = run_sync_cycle(
+        settings=settings, client=client, previous_snapshot=first_snapshot
+    )
+    # The file is still gone from disk - a naive implementation would
+    # only ever report a path as "deleted" once (when it first vanishes
+    # from the snapshot); retrying requires re-inserting its old
+    # fingerprint into the carried-forward snapshot so the *next* diff
+    # sees it as still-missing-from-current, not as "already handled."
+    third, _ = run_sync_cycle(
+        settings=settings, client=client, previous_snapshot=second_snapshot
+    )
+
+    assert [f.relative_path for f in second.deletion_failures] == [TIER_1_A]
+    assert [f.relative_path for f in third.deletion_failures] == [TIER_1_A]
+    assert mock_delete_document.call_count == 2
+
+
+@patch("agentic_rag.ingestion.scheduler.index_document")
+def test_run_sync_cycle_stops_indexing_early_when_stop_event_is_set(
+    mock_index_document, tmp_path
+):
+    corpus = _corpus(tmp_path)
+    (corpus / "tier-1").mkdir()
+    (corpus / "tier-1" / "a.txt").write_text("Arsenal drew 1-1.")
+    (corpus / "tier-1" / "b.txt").write_text("Chelsea won 3-0.")
+    client = _client(tmp_path / "qdrant")
+    settings = _settings(corpus, tmp_path / "qdrant")
+    stop_event = threading.Event()
+    stop_event.set()
+
+    result, next_snapshot = run_sync_cycle(
+        settings=settings,
+        client=client,
+        previous_snapshot={},
+        stop_event=stop_event,
+    )
+
+    assert result.indexed == []
+    mock_index_document.assert_not_called()
+    # Neither document was attempted - both must be retried, so neither
+    # should appear in the carried-forward snapshot (they weren't in
+    # previous_snapshot either, since this is their first appearance).
+    assert TIER_1_A not in next_snapshot
+    assert TIER_1_B not in next_snapshot
+
+
+@patch("agentic_rag.ingestion.scheduler.delete_document")
+@patch("agentic_rag.indexing.upsert.embed_texts")
+def test_run_sync_cycle_stops_deleting_early_when_stop_event_is_set(
+    mock_embed_texts, mock_delete_document, tmp_path
+):
+    corpus = _corpus(tmp_path)
+    (corpus / "tier-1").mkdir()
+    a_path = corpus / "tier-1" / "a.txt"
+    b_path = corpus / "tier-1" / "b.txt"
+    a_path.write_text("Arsenal drew 1-1.")
+    b_path.write_text("Chelsea won 3-0.")
+    mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
+    client = _client(tmp_path / "qdrant")
+    settings = _settings(corpus, tmp_path / "qdrant")
+    _, first_snapshot = run_sync_cycle(settings=settings, client=client, previous_snapshot={})
+
+    a_path.unlink()
+    b_path.unlink()
+    stop_event = threading.Event()
+    stop_event.set()
+
+    result, next_snapshot = run_sync_cycle(
+        settings=settings,
+        client=client,
+        previous_snapshot=first_snapshot,
+        stop_event=stop_event,
+    )
+
+    assert result.deleted == []
+    mock_delete_document.assert_not_called()
+    # Both deletions must be retried next cycle - their old fingerprints
+    # need to be back in the carried-forward snapshot so the next diff
+    # still sees them as missing-from-current (deleted).
+    assert next_snapshot.get(TIER_1_A) == first_snapshot[TIER_1_A]
+    assert next_snapshot.get(TIER_1_B) == first_snapshot[TIER_1_B]
 
 
 @patch("agentic_rag.ingestion.scheduler.EmbeddingCache")
@@ -227,7 +378,13 @@ def test_run_sync_cycle_uses_a_fresh_embedding_cache_each_call(
 
 
 def _empty_result() -> SyncCycleResult:
-    return SyncCycleResult(indexed=[], deleted=[], ingestion_failures=[], indexing_failures=[])
+    return SyncCycleResult(
+        indexed=[],
+        deleted=[],
+        ingestion_failures=[],
+        indexing_failures=[],
+        deletion_failures=[],
+    )
 
 
 def _loop_settings(tmp_path) -> Settings:
@@ -235,9 +392,12 @@ def _loop_settings(tmp_path) -> Settings:
     return _settings(corpus, tmp_path / "qdrant")
 
 
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
 @patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
 @patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
-def test_run_sync_loop_calls_run_sync_cycle_repeatedly(mock_run_cycle, mock_sleep, tmp_path):
+def test_run_sync_loop_calls_run_sync_cycle_repeatedly(
+    mock_run_cycle, mock_sleep, mock_save_snapshot, tmp_path
+):
     mock_run_cycle.side_effect = [
         (_empty_result(), {}),
         (_empty_result(), {}),
@@ -254,9 +414,12 @@ def test_run_sync_loop_calls_run_sync_cycle_repeatedly(mock_run_cycle, mock_slee
     assert mock_run_cycle.call_count == 2
 
 
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
 @patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
 @patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
-def test_run_sync_loop_continues_after_a_cycle_raises(mock_run_cycle, mock_sleep, tmp_path):
+def test_run_sync_loop_continues_after_a_cycle_raises(
+    mock_run_cycle, mock_sleep, mock_save_snapshot, tmp_path
+):
     # A whole cycle raising should be exceedingly rare (every per-document
     # step is already isolated inside run_sync_cycle), but if it happens -
     # e.g. sync_folder() itself failing to walk a folder with a permissions
@@ -276,10 +439,11 @@ def test_run_sync_loop_continues_after_a_cycle_raises(mock_run_cycle, mock_sleep
     assert mock_run_cycle.call_count == 2
 
 
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
 @patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
 @patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
 def test_run_sync_loop_threads_the_snapshot_from_one_cycle_to_the_next(
-    mock_run_cycle, mock_sleep, tmp_path
+    mock_run_cycle, mock_sleep, mock_save_snapshot, tmp_path
 ):
     second_snapshot = {"a.txt": FileState(size=1, mtime_ns=1)}
     mock_run_cycle.side_effect = [
@@ -301,10 +465,11 @@ def test_run_sync_loop_threads_the_snapshot_from_one_cycle_to_the_next(
     assert second_kwargs["previous_snapshot"] == second_snapshot
 
 
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
 @patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
 @patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
 def test_run_sync_loop_starts_from_the_given_initial_snapshot(
-    mock_run_cycle, mock_sleep, tmp_path
+    mock_run_cycle, mock_sleep, mock_save_snapshot, tmp_path
 ):
     initial_snapshot = {"a.txt": FileState(size=1, mtime_ns=1)}
     mock_run_cycle.side_effect = [(_empty_result(), {})]
@@ -322,10 +487,11 @@ def test_run_sync_loop_starts_from_the_given_initial_snapshot(
     assert mock_run_cycle.call_args_list[0].kwargs["previous_snapshot"] == initial_snapshot
 
 
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
 @patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
 @patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
 def test_run_sync_loop_defaults_to_an_empty_initial_snapshot(
-    mock_run_cycle, mock_sleep, tmp_path
+    mock_run_cycle, mock_sleep, mock_save_snapshot, tmp_path
 ):
     mock_run_cycle.side_effect = [(_empty_result(), {})]
     mock_sleep.side_effect = [asyncio.CancelledError()]
@@ -340,10 +506,11 @@ def test_run_sync_loop_defaults_to_an_empty_initial_snapshot(
     assert mock_run_cycle.call_args_list[0].kwargs["previous_snapshot"] == {}
 
 
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
 @patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
 @patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
 def test_run_sync_loop_sleeps_for_settings_sync_interval_seconds(
-    mock_run_cycle, mock_sleep, tmp_path
+    mock_run_cycle, mock_sleep, mock_save_snapshot, tmp_path
 ):
     mock_run_cycle.side_effect = [(_empty_result(), {})]
     mock_sleep.side_effect = [asyncio.CancelledError()]
@@ -356,3 +523,85 @@ def test_run_sync_loop_sleeps_for_settings_sync_interval_seconds(
     asyncio.run(_run())
 
     mock_sleep.assert_called_once_with(42.0)
+
+
+@patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
+@patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
+def test_run_sync_loop_persists_the_snapshot_after_each_successful_cycle(
+    mock_run_cycle, mock_sleep, tmp_path
+):
+    new_snapshot = {"a.txt": FileState(size=1, mtime_ns=1)}
+    mock_run_cycle.side_effect = [(_empty_result(), new_snapshot)]
+    mock_sleep.side_effect = [asyncio.CancelledError()]
+    settings = _loop_settings(tmp_path)
+
+    async def _run():
+        with pytest.raises(asyncio.CancelledError):
+            await run_sync_loop(settings=settings, client=object())
+
+    with patch("agentic_rag.ingestion.scheduler.save_snapshot") as mock_save_snapshot:
+        asyncio.run(_run())
+
+    mock_save_snapshot.assert_called_once_with(settings.sync_snapshot_path, new_snapshot)
+
+
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
+@patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
+@patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
+def test_run_sync_loop_does_not_persist_a_snapshot_when_a_cycle_raises(
+    mock_run_cycle, mock_sleep, mock_save_snapshot, tmp_path
+):
+    mock_run_cycle.side_effect = RuntimeError("boom")
+    mock_sleep.side_effect = [asyncio.CancelledError()]
+    settings = _loop_settings(tmp_path)
+
+    async def _run():
+        with pytest.raises(asyncio.CancelledError):
+            await run_sync_loop(settings=settings, client=object())
+
+    asyncio.run(_run())
+
+    mock_save_snapshot.assert_not_called()
+
+
+def test_run_sync_loop_waits_for_the_in_flight_cycle_before_propagating_cancellation(
+    tmp_path,
+):
+    # Cancelling a task awaiting asyncio.to_thread() only stops the
+    # *awaiting coroutine* - Python threads can't be interrupted, so the
+    # real work keeps running regardless. If run_sync_loop let
+    # CancelledError propagate immediately, app.py's lifespan could
+    # proceed to client.close() while this orphaned thread is still
+    # mid-index_document()/delete_document() against that same client - a
+    # real use-after-close race, reproduced independently by 3 review
+    # angles for PR #46 and empirically confirmed with a standalone
+    # asyncio.to_thread() cancellation script before this fix.
+    cycle_finished = threading.Event()
+
+    def fake_cycle(*, settings, client, previous_snapshot, stop_event):
+        # Simulate a cycle that's genuinely still running (mid-item) when
+        # cancellation arrives - it only notices stop_event and wraps up
+        # after "finishing" its current item, the same way a real
+        # in-flight index_document()/delete_document() call can't be
+        # interrupted mid-call.
+        stop_event.wait(timeout=5)
+        time.sleep(0.2)
+        cycle_finished.set()
+        return _empty_result(), {}
+
+    settings = _loop_settings(tmp_path)
+
+    async def _run():
+        with patch(
+            "agentic_rag.ingestion.scheduler.run_sync_cycle", side_effect=fake_cycle
+        ), patch("agentic_rag.ingestion.scheduler.save_snapshot"):
+            task = asyncio.ensure_future(run_sync_loop(settings=settings, client=object()))
+            await asyncio.sleep(0.1)  # let the loop actually start its first cycle
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            # By the time `await task` raises, the in-flight cycle must
+            # have genuinely finished - not just been asked to.
+            assert cycle_finished.is_set()
+
+    asyncio.run(_run())

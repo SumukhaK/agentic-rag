@@ -1,12 +1,14 @@
 import asyncio
 import tomllib
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
 from agentic_rag.api.app import create_app
 from agentic_rag.config import Settings
+from agentic_rag.ingestion.watcher import FileState
 
 _PYPROJECT_PATH = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
@@ -138,3 +140,31 @@ def test_lifespan_cancels_the_sync_task_on_shutdown(tmp_path):
     # true, not just eventually true.
     assert sync_task.done()
     assert sync_task.cancelled()
+
+
+def test_lifespan_loads_the_initial_sync_snapshot_from_disk(tmp_path):
+    # Without this, a restart would start run_sync_loop() from an empty
+    # in-memory snapshot every time - not just a wasteful full corpus
+    # re-index, but a real correctness gap: an empty starting snapshot can
+    # never report anything as deleted (diff_snapshots() only reports a
+    # path missing from `current` that was *present* in `previous`), so a
+    # file removed while the process was down would never be detected as
+    # deleted at all, not even on the next cycle after restart.
+    settings = _test_settings(tmp_path)
+    persisted = {"a.txt": FileState(size=1, mtime_ns=1)}
+
+    async def _never_returns(**kwargs):
+        await asyncio.Event().wait()
+
+    with (
+        patch("agentic_rag.api.app.load_snapshot", return_value=persisted) as mock_load,
+        patch(
+            "agentic_rag.api.app.run_sync_loop", side_effect=_never_returns
+        ) as mock_run_loop,
+    ):
+        app = create_app(settings)
+        with TestClient(app):
+            pass
+
+    mock_load.assert_called_once_with(settings.sync_snapshot_path)
+    assert mock_run_loop.call_args.kwargs["initial_snapshot"] == persisted

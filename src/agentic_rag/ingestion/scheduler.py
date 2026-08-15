@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass
 
 from qdrant_client import QdrantClient
@@ -10,6 +11,7 @@ from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.indexing.upsert import delete_document, index_document
 from agentic_rag.ingestion.pipeline import IngestionFailure
+from agentic_rag.ingestion.snapshot_store import save_snapshot
 from agentic_rag.ingestion.sync import sync_folder
 from agentic_rag.ingestion.watcher import FileState
 
@@ -20,12 +22,20 @@ logger = logging.getLogger(__name__)
 class SyncCycleResult:
     """Outcome of one `run_sync_cycle()` call: what actually reached the
     index, as opposed to `SyncResult` (`ingestion/sync.py`), which only
-    reports what *changed on disk*."""
+    reports what *changed on disk*.
+
+    `indexing_failures` and `deletion_failures` are kept separate, not
+    merged into one list - a document that failed to index and a
+    deletion that failed are different failure kinds a caller may want to
+    alert on differently, and merging them would make that distinction
+    unrecoverable from the result alone.
+    """
 
     indexed: list[str]
     deleted: list[str]
     ingestion_failures: list[IngestionFailure]
     indexing_failures: list[IngestionFailure]
+    deletion_failures: list[IngestionFailure]
 
 
 def run_sync_cycle(
@@ -33,6 +43,7 @@ def run_sync_cycle(
     settings: Settings,
     client: QdrantClient,
     previous_snapshot: dict[str, FileState],
+    stop_event: threading.Event | None = None,
 ) -> tuple[SyncCycleResult, dict[str, FileState]]:
     """One full sync cycle: detect changes since `previous_snapshot`, then
     propagate them to the Qdrant index (FR4). Composes `sync_folder()`
@@ -56,17 +67,36 @@ def run_sync_cycle(
     target scale (10,000+ docs): `sync_folder()`'s own diffing already
     skips re-embedding documents that didn't change between cycles
     regardless of the cache's lifetime, so the benefit a process-lifetime
-    cache would add on top of that - reusing identical chunk text (e.g.
-    shared boilerplate) across documents that happen to change in
-    *different* cycles - is narrower than it first looks, and not worth
-    the unbounded growth risk over days/weeks of uptime.
+    cache would add on top of that is narrower than it first looks, and
+    not worth the unbounded growth risk over days/weeks of uptime.
 
-    A document that fails at the indexing step (an embedding error, a
-    Qdrant error) is caught and reported in `indexing_failures`, the same
-    per-file isolation `sync_folder()`/`process_changes()` already apply
-    to ingestion failures (`docs/REQUIREMENTS.md` §11): one bad document
-    must not stall every other document - or every deletion - in the same
-    cycle. A deletion that fails is isolated the same way.
+    **A document or deletion that fails is retried on the next cycle, not
+    silently dropped forever.** `sync_folder()`'s own `current_snapshot`
+    is computed purely from disk state (`ingestion/sync.py`) - it has no
+    idea whether `index_document()`/`delete_document()` actually
+    succeeded for any given path. Naively returning it unmodified as the
+    next cycle's `previous_snapshot` would mean a path that failed once
+    (a transient Ollama timeout, a Qdrant error) is now "seen" and never
+    diffed as changed again, since its on-disk fingerprint never moves.
+    To prevent that: every path that failed - at the ingestion-pipeline
+    stage (`ingestion_failures`), the indexing stage
+    (`indexing_failures`), or the deletion stage (`deletion_failures`) -
+    has its entry in the returned snapshot reverted to whatever it was in
+    `previous_snapshot` (or removed entirely if it wasn't present there),
+    so the next cycle's diff sees a mismatch and retries it. This applies
+    uniformly to a failed edit, a failed new-file ingestion, and a failed
+    deletion - re-inserting a deleted path's *old* fingerprint is exactly
+    what makes the next diff report it as still-deleted, since the real
+    file is (still) absent from disk either way.
+
+    `stop_event`, if given, is checked between each document/deletion
+    (not mid-item) - if set, every remaining, not-yet-attempted path is
+    treated the same as a failure for the retry logic above. This exists
+    so `run_sync_loop()` can request a graceful, bounded stop during
+    shutdown: cancellation can't interrupt a thread that's already
+    running (Python threads aren't preemptible), but checking between
+    items bounds how much *additional* work happens after a stop is
+    requested to roughly one item's worth, not the rest of the cycle.
     """
     embedding_cache = EmbeddingCache()
 
@@ -77,9 +107,17 @@ def run_sync_cycle(
         settings.access_tiers,
     )
 
+    unresolved_paths: list[str] = [
+        failure.relative_path for failure in sync_result.failures
+    ]
+
     indexed: list[str] = []
     indexing_failures: list[IngestionFailure] = []
-    for document in sync_result.documents:
+    documents = sync_result.documents
+    for position, document in enumerate(documents):
+        if stop_event is not None and stop_event.is_set():
+            unresolved_paths.extend(d.relative_path for d in documents[position:])
+            break
         try:
             index_document(
                 client,
@@ -92,36 +130,47 @@ def run_sync_cycle(
                 embedding_cache=embedding_cache,
             )
         except Exception as exc:  # noqa: BLE001 - isolate one bad document, see docstring
+            reason = f"{type(exc).__name__}: {exc}"
             indexing_failures.append(
-                IngestionFailure(
-                    relative_path=document.relative_path,
-                    reason=f"{type(exc).__name__}: {exc}",
-                )
+                IngestionFailure(relative_path=document.relative_path, reason=reason)
             )
+            unresolved_paths.append(document.relative_path)
             continue
         indexed.append(document.relative_path)
 
     deleted: list[str] = []
-    for relative_path in sync_result.deleted:
+    deletion_failures: list[IngestionFailure] = []
+    deleted_paths = sync_result.deleted
+    for position, relative_path in enumerate(deleted_paths):
+        if stop_event is not None and stop_event.is_set():
+            unresolved_paths.extend(deleted_paths[position:])
+            break
         try:
             delete_document(client, settings.qdrant_collection_name, relative_path)
         except Exception as exc:  # noqa: BLE001 - isolate one bad deletion, see docstring
-            indexing_failures.append(
-                IngestionFailure(
-                    relative_path=relative_path,
-                    reason=f"{type(exc).__name__}: {exc}",
-                )
+            reason = f"{type(exc).__name__}: {exc}"
+            deletion_failures.append(
+                IngestionFailure(relative_path=relative_path, reason=reason)
             )
+            unresolved_paths.append(relative_path)
             continue
         deleted.append(relative_path)
+
+    carry_forward_snapshot = dict(sync_result.current_snapshot)
+    for path in unresolved_paths:
+        if path in previous_snapshot:
+            carry_forward_snapshot[path] = previous_snapshot[path]
+        else:
+            carry_forward_snapshot.pop(path, None)
 
     result = SyncCycleResult(
         indexed=indexed,
         deleted=deleted,
         ingestion_failures=sync_result.failures,
         indexing_failures=indexing_failures,
+        deletion_failures=deletion_failures,
     )
-    return result, sync_result.current_snapshot
+    return result, carry_forward_snapshot
 
 
 async def run_sync_loop(
@@ -133,19 +182,18 @@ async def run_sync_loop(
     """Run `run_sync_cycle()` forever, every `settings.sync_interval_seconds`,
     until cancelled.
 
-    Starts from `initial_snapshot` (defaults to `{}` - a fresh process
-    treats every file already in the watched folder as new, indexing the
-    whole corpus once on startup). The snapshot each cycle returns becomes
-    the next cycle's `previous_snapshot`; nothing is persisted to disk
-    between process restarts, so a restart re-walks and re-indexes the
-    full corpus rather than resuming incrementally. That's wasteful, not
-    wrong - `index_document()`'s point IDs are deterministic, so
-    re-indexing an unchanged document just re-writes the same points, not
-    duplicates - and is accepted as a known limitation for this phase
-    rather than solved with on-disk snapshot persistence, matching
-    `EmbeddingCache`'s own "not solved yet, flagged rather than silently
-    deferred" precedent for a cost that only matters once restarts are
-    frequent enough for it to.
+    Starts from `initial_snapshot` (defaults to `{}` - a corpus with no
+    persisted snapshot yet treats every file already in the watched
+    folder as new, indexing it once). The snapshot each cycle returns is
+    persisted to `settings.sync_snapshot_path`
+    (`ingestion/snapshot_store.py`) and becomes the next cycle's
+    `previous_snapshot` - both so a restart can resume incrementally
+    instead of re-walking and re-indexing the whole corpus, and, more
+    importantly, so a file deleted while the process was down is still
+    correctly detected as deleted on the next cycle after restart (an
+    empty starting snapshot can never report anything as deleted, since
+    `diff_snapshots()` only reports a path missing from `current` that
+    was *present* in `previous`).
 
     Each cycle's blocking work (a filesystem walk, `markitdown`
     conversion, Ollama embedding calls, Qdrant upserts) runs via
@@ -155,34 +203,83 @@ async def run_sync_loop(
     can't run as a separate worker process without lock contention, so it
     has to share this one.
 
-    A whole cycle raising is caught and logged rather than killing the
-    loop - every per-document/per-deletion failure is already isolated
-    inside `run_sync_cycle()`, so this is a safety net for something
-    outside that (e.g. `sync_folder()` itself failing to walk the folder).
-    A transient failure should delay freshness, not permanently stop it:
-    the next cycle naturally retries from the same `previous_snapshot`,
-    since nothing was consumed or discarded on failure.
+    **Cancellation waits for the in-flight cycle to actually stop, not
+    just for the coroutine wrapper to unwind.** Cancelling an
+    `asyncio.to_thread()` call only delivers `CancelledError` to the
+    *awaiting coroutine*; whether the underlying OS thread's work is
+    actually interrupted depends on timing, and naively trusting either
+    outcome is wrong. Naively letting `CancelledError` propagate
+    immediately would let `app.py`'s `lifespan` proceed to `client.close()`
+    while an orphaned thread is still mid-`index_document()`/
+    `delete_document()` against that same `client` - a real use-after-close
+    race, not just a slow shutdown. The reverse mistake is just as real: an
+    earlier version of this function waited on a plain `threading.Event`
+    set in the cycle's own `finally` block - which deadlocked forever
+    whenever cancellation landed *before* the work had actually started
+    running (a genuinely common case for a fast, no-op cycle), because
+    `concurrent.futures.Future.cancel()` succeeds for not-yet-started work
+    and the cycle - and its `finally` - then never runs at all, so nothing
+    would ever set that event. `asyncio.shield()` solves both failure modes
+    at once: it prevents the wrapped future from ever actually being
+    cancelled, whether it was already running or still queued, so it's
+    always safe to wait for its real result. On cancellation, a
+    `stop_event` shared with the in-flight `run_sync_cycle()` call is set
+    (so it stops after its *current* item rather than continuing through
+    the rest of the cycle, bounding shutdown to roughly one item's worth of
+    work), then the same future is awaited again - shielded again, so this
+    second wait can't itself be cancelled and fall into the same trap -
+    before `CancelledError` is allowed to propagate.
+
+    A whole cycle raising (rare - every per-document/deletion/failure is
+    already isolated inside `run_sync_cycle()` itself) is caught and
+    logged rather than killing the loop. Deliberately broad
+    (`except Exception`, not a curated tuple of known-transient error
+    types the way `plan_and_retrieve()`'s retry loop narrows its own
+    catch) - unlike that loop, which is bounded (a handful of attempts,
+    then a canonical fallback), this one runs for the entire life of the
+    process with no bound, so resilience against an *unanticipated*
+    failure mode matters more here than distinguishing "worth retrying"
+    from "never will be": a masked bug still surfaces loudly in the logs
+    via `logger.exception()`, it just doesn't get to take down index
+    freshness for the rest of the process's uptime along with it.
     """
     snapshot = initial_snapshot if initial_snapshot is not None else {}
     while True:
-        try:
-            result, snapshot = await asyncio.to_thread(
-                run_sync_cycle, settings=settings, client=client, previous_snapshot=snapshot
+        stop_event = threading.Event()
+        cycle_future = asyncio.ensure_future(
+            asyncio.to_thread(
+                run_sync_cycle,
+                settings=settings,
+                client=client,
+                previous_snapshot=snapshot,
+                stop_event=stop_event,
             )
+        )
+
+        try:
+            result, snapshot = await asyncio.shield(cycle_future)
         except asyncio.CancelledError:
+            stop_event.set()
+            result, snapshot = await asyncio.shield(cycle_future)
             raise
         except Exception:
             logger.exception("sync cycle failed")
         else:
-            if result.indexed or result.deleted or result.ingestion_failures or (
-                result.indexing_failures
+            save_snapshot(settings.sync_snapshot_path, snapshot)
+            if (
+                result.indexed
+                or result.deleted
+                or result.ingestion_failures
+                or result.indexing_failures
+                or result.deletion_failures
             ):
                 logger.info(
                     "sync cycle: indexed=%d deleted=%d ingestion_failures=%d "
-                    "indexing_failures=%d",
+                    "indexing_failures=%d deletion_failures=%d",
                     len(result.indexed),
                     len(result.deleted),
                     len(result.ingestion_failures),
                     len(result.indexing_failures),
+                    len(result.deletion_failures),
                 )
         await asyncio.sleep(settings.sync_interval_seconds)

@@ -11,6 +11,7 @@ from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
 from agentic_rag.ingestion.scheduler import run_sync_loop
+from agentic_rag.ingestion.snapshot_store import load_snapshot
 from agentic_rag.orchestration.semantic_cache import SemanticCache
 
 
@@ -38,9 +39,22 @@ def create_app(settings: Settings) -> FastAPI:
     FR4) as a background `asyncio.Task`, sharing this process rather than
     running as a separate worker - the same single-process, on-disk-locked
     Qdrant constraint above rules out a separate sync process entirely.
-    Cancelled and awaited in `finally`, the same place `client.close()`
-    already lives, so shutdown doesn't return until the in-flight sync
-    cycle (if any) has actually stopped, not just been asked to.
+    Its starting snapshot is loaded from `settings.sync_snapshot_path` if
+    one was persisted by a prior run (`snapshot_store.load_snapshot()`
+    returns `{}` otherwise) - see `run_sync_loop()`'s own docstring for
+    why this matters beyond just avoiding a wasteful full re-index on
+    restart.
+
+    Cancelled in `finally`, the same place `client.close()` already
+    lives - but the two are in *nested* `try`/`finally` blocks, not
+    sequential statements, so `client.close()` is guaranteed to run
+    regardless of what cancelling/awaiting `sync_task` does or raises.
+    `run_sync_loop()`'s own docstring explains why `await sync_task`
+    genuinely waits for the in-flight sync cycle to stop (not just for
+    the coroutine wrapper to unwind) - cancelling a thread-backed
+    `asyncio.to_thread()` call can't interrupt a running thread, so
+    `run_sync_loop()` cooperates via a `stop_event`/`done_event` pair
+    internally rather than relying on cancellation alone.
     """
 
     @asynccontextmanager
@@ -53,15 +67,20 @@ def create_app(settings: Settings) -> FastAPI:
         app.state.qdrant_client = client
         app.state.embedding_cache = EmbeddingCache()
         app.state.semantic_cache = SemanticCache()
-        sync_task = asyncio.create_task(run_sync_loop(settings=settings, client=client))
+        initial_snapshot = load_snapshot(settings.sync_snapshot_path)
+        sync_task = asyncio.create_task(
+            run_sync_loop(settings=settings, client=client, initial_snapshot=initial_snapshot)
+        )
         app.state.sync_task = sync_task
         try:
             yield
         finally:
-            sync_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await sync_task
-            client.close()
+            try:
+                sync_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sync_task
+            finally:
+                client.close()
 
     app = FastAPI(
         title="Agentic RAG",

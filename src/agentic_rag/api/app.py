@@ -12,6 +12,7 @@ from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
 from agentic_rag.ingestion.scheduler import run_sync_loop
 from agentic_rag.ingestion.snapshot_store import load_snapshot
+from agentic_rag.observability.request_log import configure_request_logging
 from agentic_rag.orchestration.semantic_cache import SemanticCache
 
 
@@ -55,7 +56,15 @@ def create_app(settings: Settings) -> FastAPI:
     `asyncio.to_thread()` call can't interrupt a running thread, so
     `run_sync_loop()` cooperates via a `stop_event`/`done_event` pair
     internally rather than relying on cancellation alone.
+
+    `configure_request_logging()` (`observability/request_log.py`) is
+    called here, once per app, rather than at import time in that
+    module - a module-level side effect on import would run (and attach
+    a handler) even for code that only imports the module to reuse its
+    `log_query_request()`/`VERDICT_*` symbols without ever wanting a
+    handler auto-attached, e.g. a script or a test.
     """
+    configure_request_logging()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

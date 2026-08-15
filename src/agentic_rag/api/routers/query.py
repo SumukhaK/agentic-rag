@@ -1,3 +1,4 @@
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 
@@ -13,6 +14,14 @@ from agentic_rag.api.dependencies import (
 from agentic_rag.api.schemas import CitationModel, QueryRequest, QueryResponse
 from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache
+from agentic_rag.observability.request_log import (
+    VERDICT_ANSWERED,
+    VERDICT_CANNOT_ANSWER,
+    VERDICT_REFUSED_FOUL_LANGUAGE,
+    VERDICT_REFUSED_INJECTION,
+    VERDICT_REFUSED_OUTPUT_SECURITY,
+    log_query_request,
+)
 from agentic_rag.orchestration.foul_language import (
     FOUL_LANGUAGE_REFUSAL_MESSAGE,
     check_for_foul_language,
@@ -27,7 +36,7 @@ from agentic_rag.retrieval.access import UnknownAccessTierError
 router = APIRouter()
 
 
-def _screen_input(query: str, *, settings: Settings) -> str | None:
+def _screen_input(query: str, *, settings: Settings) -> tuple[str, str] | None:
     """Screen `query` for a prompt injection attempt and for foul/abusive
     language before it's used anywhere else - checked *before*
     `rewrite_query()` runs at all, since `rewrite_query()` makes its own
@@ -38,15 +47,19 @@ def _screen_input(query: str, *, settings: Settings) -> str | None:
     independent Ollama-backed work on the hot path, since neither check
     depends on the other's result.
 
-    Returns the refusal message to send back verbatim if either check
-    flags the query, `None` if both are clean. Injection reuses the
-    single canonical `CANNOT_ANSWER_MESSAGE` (REQUIREMENTS.md §8 rule 2)
-    rather than a distinct message, deliberately, so a would-be attacker
-    can't tell an injection attempt was specifically what triggered a
-    refusal versus any other reason the system declined to answer. Foul
-    language gets its own distinct `FOUL_LANGUAGE_REFUSAL_MESSAGE`
-    instead - see `foul_language.py`'s docstring for why that one isn't
-    an adversarial-calibration risk the same way.
+    Returns `(refusal_message, verdict)` if either check flags the
+    query, `None` if both are clean. Injection reuses the single
+    canonical `CANNOT_ANSWER_MESSAGE` (REQUIREMENTS.md §8 rule 2) rather
+    than a distinct message, deliberately, so a would-be attacker can't
+    tell an injection attempt was specifically what triggered a refusal
+    versus any other reason the system declined to answer. Foul language
+    gets its own distinct `FOUL_LANGUAGE_REFUSAL_MESSAGE` instead - see
+    `foul_language.py`'s docstring for why that one isn't an
+    adversarial-calibration risk the same way. `verdict` is returned
+    alongside the message (rather than the caller re-deriving it by
+    comparing the message text back against `CANNOT_ANSWER_MESSAGE`) so
+    the request log always names the real reason a query was refused,
+    even though the two paths deliberately return an identical message.
 
     Only the current turn's `query` is screened, not the conversation
     history the client resent alongside it - REQUIREMENTS.md §12 says
@@ -67,9 +80,9 @@ def _screen_input(query: str, *, settings: Settings) -> str | None:
         foul_language_result = foul_language_future.result()
 
     if injection_result.is_injection:
-        return CANNOT_ANSWER_MESSAGE
+        return CANNOT_ANSWER_MESSAGE, VERDICT_REFUSED_INJECTION
     if foul_language_result.is_foul:
-        return FOUL_LANGUAGE_REFUSAL_MESSAGE
+        return FOUL_LANGUAGE_REFUSAL_MESSAGE, VERDICT_REFUSED_FOUL_LANGUAGE
     return None
 
 
@@ -137,12 +150,39 @@ def query(
     to it, so there is nothing to tier-check, and it's a fixed, known-safe
     string that can't "reflect a successful injection" - calling the judge
     on it would be a pure wasted LLM round-trip.
+
+    One structured JSON log line (`observability/request_log.py`) is
+    emitted on every path that returns a `QueryResponse`, timed per phase
+    via `time.monotonic()` - the 422 (`UnknownAccessTierError`) path is
+    the one exception, since it's a client input-validation failure
+    before any pipeline outcome exists to log, not one of the fixed
+    `VERDICT_*` vocabulary's cases.
     """
-    refusal = _screen_input(payload.query, settings=settings)
-    if refusal is not None:
+    request_start = time.monotonic()
+    history_turns = len(payload.history)
+
+    screen_start = time.monotonic()
+    screened = _screen_input(payload.query, settings=settings)
+    screen_seconds = time.monotonic() - screen_start
+    if screened is not None:
+        refusal, verdict = screened
+        log_query_request(
+            user_tier=payload.user_tier,
+            query=payload.query,
+            rewritten_query=None,
+            history_turns=history_turns,
+            verdict=verdict,
+            retrieval_hit_count=0,
+            cited_paths=[],
+            timings_seconds={
+                "screen_input": screen_seconds,
+                "total": time.monotonic() - request_start,
+            },
+        )
         return QueryResponse(answer=refusal, citations=[])
 
     history = [ConversationTurn(t.user_query, t.assistant_answer) for t in payload.history]
+    rewrite_start = time.monotonic()
     rewritten_query = rewrite_query(
         history,
         payload.query,
@@ -151,8 +191,10 @@ def query(
         timeout=settings.generation_timeout_seconds,
         temperature=settings.rewrite_temperature,
     )
+    rewrite_seconds = time.monotonic() - rewrite_start
 
     try:
+        answer_start = time.monotonic()
         answer = answer_with_cache(
             rewritten_query,
             payload.user_tier,
@@ -177,10 +219,30 @@ def query(
             similarity_threshold=settings.semantic_cache_similarity_threshold,
             ttl_seconds=settings.semantic_cache_ttl_seconds,
         )
+        answer_seconds = time.monotonic() - answer_start
+
+        retrieval_hit_count = len(answer.citations)
+        cited_paths = [citation.relative_path for citation in answer.citations]
 
         if answer.text == CANNOT_ANSWER_MESSAGE:
+            log_query_request(
+                user_tier=payload.user_tier,
+                query=payload.query,
+                rewritten_query=rewritten_query,
+                history_turns=history_turns,
+                verdict=VERDICT_CANNOT_ANSWER,
+                retrieval_hit_count=0,
+                cited_paths=[],
+                timings_seconds={
+                    "screen_input": screen_seconds,
+                    "rewrite": rewrite_seconds,
+                    "answer": answer_seconds,
+                    "total": time.monotonic() - request_start,
+                },
+            )
             return QueryResponse(answer=CANNOT_ANSWER_MESSAGE, citations=[])
 
+        security_start = time.monotonic()
         security_result = check_output_security(
             rewritten_query,
             answer.text,
@@ -192,11 +254,46 @@ def query(
             timeout=settings.generation_timeout_seconds,
             temperature=settings.judge_temperature,
         )
+        security_seconds = time.monotonic() - security_start
     except UnknownAccessTierError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    timings_seconds = {
+        "screen_input": screen_seconds,
+        "rewrite": rewrite_seconds,
+        "answer": answer_seconds,
+        "output_security": security_seconds,
+        "total": time.monotonic() - request_start,
+    }
+
     if not security_result.is_safe:
+        # retrieval_hit_count/cited_paths reflect what was actually
+        # retrieved and suppressed, not the empty citation list the
+        # caller receives - a reader debugging *why* output security
+        # flagged this answer needs to see what it flagged, not what got
+        # returned instead.
+        log_query_request(
+            user_tier=payload.user_tier,
+            query=payload.query,
+            rewritten_query=rewritten_query,
+            history_turns=history_turns,
+            verdict=VERDICT_REFUSED_OUTPUT_SECURITY,
+            retrieval_hit_count=retrieval_hit_count,
+            cited_paths=cited_paths,
+            timings_seconds=timings_seconds,
+        )
         return QueryResponse(answer=CANNOT_ANSWER_MESSAGE, citations=[])
+
+    log_query_request(
+        user_tier=payload.user_tier,
+        query=payload.query,
+        rewritten_query=rewritten_query,
+        history_turns=history_turns,
+        verdict=VERDICT_ANSWERED,
+        retrieval_hit_count=retrieval_hit_count,
+        cited_paths=cited_paths,
+        timings_seconds=timings_seconds,
+    )
 
     return QueryResponse(
         answer=answer.text,

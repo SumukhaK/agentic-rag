@@ -1555,7 +1555,71 @@ building unwired infrastructure to fill the slot.
       plain-language definitions of every metric, the latest live run's
       full per-question breakdown (answers, verdicts, durations), and an
       overall health assessment. Full suite: 425 passed, 0 failures.
-- [ ] Logging/tracing across the pipeline
+- [x] Logging/tracing across the pipeline — own PR, `feat/query-request-
+      logging`. Scoped with the user via `AskUserQuestion` before writing
+      any code (no existing spec in `docs/REQUIREMENTS.md`, per this
+      repo's own "never invent architecture" rule): structured request
+      logging for `POST /query` end-to-end, as JSON lines to stdout - not
+      full span-based tracing, and not the background sync job (a
+      separate, already-isolated concern with its own failure/retry
+      logging built in Phase 7).
+
+      New `src/agentic_rag/observability/` subpackage,
+      `request_log.py`: `configure_request_logging()` attaches a
+      `StreamHandler` (`%(message)s` only, since the message itself is
+      already a complete JSON object) to a dedicated `agentic_rag.query`
+      logger, idempotently (removes any handler it previously attached
+      before adding a new one - re-running it, or pointing it at a
+      different stream, never leaves the logger writing every line more
+      than once) - called once, in `api/app.py`'s `create_app()`, not as
+      an import-time side effect in the module itself, so importing
+      `log_query_request()`/the `VERDICT_*` constants elsewhere (a
+      script, a test) never auto-attaches a handler nobody asked for.
+      `log_query_request()` emits one line per request - `event`,
+      `timestamp`, `user_tier`, `query`, `rewritten_query`,
+      `history_turns`, `verdict`, `retrieval_hit_count`, `cited_paths`,
+      `timings_seconds` - once the outcome is known, not scattered calls
+      per step, so one line always tells a whole request's story even
+      under concurrent load. `verdict` is a fixed vocabulary
+      (`VERDICT_ANSWERED`/`VERDICT_REFUSED_INJECTION`/
+      `VERDICT_REFUSED_FOUL_LANGUAGE`/`VERDICT_CANNOT_ANSWER`/
+      `VERDICT_REFUSED_OUTPUT_SECURITY`), not free text, so a log query
+      like "how often do we refuse for injection vs. foul language"
+      doesn't have to fuzzy-match message strings.
+
+      Wired into `api/routers/query.py`: `_screen_input()` now returns
+      `(message, verdict)` instead of just `message`, so the log always
+      names the *real* refusal reason even though injection and foul-
+      language refusals deliberately return different message text (see
+      `_screen_input()`'s own docstring for why that pairing matters -
+      it's not derivable by comparing the message back against
+      `CANNOT_ANSWER_MESSAGE`, since that string is also the *later*
+      "genuinely can't answer" fallback). Each phase (`screen_input`,
+      `rewrite`, `answer`, `output_security`) is timed independently via
+      `time.monotonic()`, alongside a `total`; only the phases that
+      actually ran for a given `verdict` appear in `timings_seconds` (an
+      early injection refusal has just `screen_input`/`total`, not four
+      keys with the rest at `0.0`, which would misrepresent "didn't run"
+      as "ran instantly"). One exception: the 422 `UnknownAccessTierError`
+      path isn't logged at all - a request-validation failure, not one of
+      the five real pipeline outcomes. For a `refused_output_security`
+      verdict, `retrieval_hit_count`/`cited_paths` deliberately reflect
+      what was actually retrieved and suppressed, not the empty citation
+      list the caller receives - the whole point of logging that verdict
+      is debugging *why* it was flagged, which requires seeing what got
+      flagged.
+
+      12 new tests (6 for `request_log.py` in isolation, 6 verifying the
+      router wiring end-to-end via a `TestClient` and a handler attached
+      directly to the `agentic_rag.query` logger - not `caplog`, since
+      `configure_request_logging()`'s `propagate = False` means records
+      never reach the root logger `caplog` listens to by default). Full
+      suite: 437 passed, 0 failures. **Live-verified end-to-end** against
+      a real running app (`TestClient` + real Ollama, empty corpus): one
+      real request produced exactly one structured JSON line with
+      accurate phase timings (`screen_input: 5.0s`, `answer: 70.9s`,
+      `total: 75.9s` on this machine's constrained hardware) and the
+      correct `cannot_answer` verdict for a corpus with nothing indexed.
 - [ ] Load test at target scale (10,000 docs × ~50 pages)
 - [ ] Deployment hardening (containerization, health checks)
 

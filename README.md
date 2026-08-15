@@ -790,14 +790,22 @@ Shipped so far (`src/agentic_rag/api/`):
   was liveness-only with no readiness signal, and there was no ASGI
   entry point anywhere in the codebase for `uvicorn`/Docker to actually
   run. Added `GET /health/ready` (checks Qdrant + Ollama, 503 naming
-  which one failed) and `src/agentic_rag/api/main.py`. New
-  `Dockerfile`/`.dockerignore` — **written carefully but never actually
-  built or run**, since Docker isn't installed in this dev environment;
-  see the [Deployment](#deployment) section above for the full caveat.
-  9 new tests, full suite 473 passed. Live-verified everything Docker's
-  absence didn't block: `/health/ready` against real Qdrant + real
-  Ollama, and again with Ollama unreachable; the new entry point via a
-  real `uvicorn` process serving real requests.
+  which one failed) and `src/agentic_rag/api/main.py:create` — a
+  factory function for `uvicorn agentic_rag.api.main:create --factory`,
+  not a bare module-level `app`, so importing the module has no
+  `Settings()`-validation side effect. New `Dockerfile`/`.dockerignore`
+  — **written carefully but never actually built or run**, since Docker
+  isn't installed in this dev environment; see the
+  [Deployment](#deployment) section above for the full caveat. A 9th,
+  Dockerfile-specific review pass (beyond the usual 8-angle
+  `/code-review`) caught the highest-value findings: a missing
+  `libgomp1` runtime dependency, a `VOLUME`/`chown` ownership-ordering
+  gap, and `uv run` unsafely standing in as PID 1 instead of `uvicorn`
+  itself. 10 findings fixed in total. 14 new tests, full suite 477
+  passed. Live-verified everything Docker's absence didn't block:
+  `/health/ready` against real Qdrant + real Ollama, and again with
+  Ollama unreachable; the new `create --factory` entry point via a real
+  `uvicorn` process serving real requests.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

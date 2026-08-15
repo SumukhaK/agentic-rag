@@ -1763,54 +1763,110 @@ building unwired infrastructure to fill the slot.
       Neither gap needed Docker to exist or be fixed.
 
       Fixed: new `GET /health/ready` (`api/routers/health.py`) - checks
-      Qdrant (`collection_exists()`) and Ollama (a lightweight request
-      to its base URL, bounded by a new, deliberately short
-      `readiness_check_timeout_seconds` setting, separate from the
-      embedding/generation timeouts) independently, always checking
-      both even after one fails, returning 503 with a `checks` field
-      naming exactly which dependency is the problem - not just that
-      something is. `GET /health` is untouched and still always 200
-      regardless of dependency state, by design (verified with a
-      dedicated test forcing Qdrant to fail and confirming `/health`
-      doesn't notice). New `src/agentic_rag/api/main.py`:
-      `app = create_app(Settings())`, the one place `Settings()` is
-      built from the real environment instead of a test's ephemeral
-      one, making `uvicorn agentic_rag.api.main:app` actually work.
+      Qdrant (`collection_exists()`, checking the boolean return itself
+      rather than only treating an exception as failure) and Ollama
+      (`GET /api/tags`, the real API surface every other caller in this
+      codebase hits, not the bare base URL - a reverse proxy could
+      answer 200 at "/" while the actual API is down), bounded by a
+      new, deliberately short `readiness_check_timeout_seconds` setting
+      (`gt=0`), separate from the embedding/generation timeouts. Both
+      checks catch bare `Exception` (not just `requests.RequestException`
+      for Ollama) so an unusual failure mode degrades to a reported
+      `checks` entry instead of 500ing the whole endpoint. Both checks
+      always run even after one fails, and readiness is derived from a
+      `failures: list[str]` populated only in `except` blocks (not a
+      `checks[x] == "ok"` string-sentinel comparison), returning 503
+      with a `checks` field naming exactly which dependency is the
+      problem - not just that something is. `GET /health` is untouched
+      and still always 200 regardless of dependency state, by design
+      (verified with a dedicated test forcing Qdrant to fail and
+      confirming `/health` doesn't notice).
 
-      New `Dockerfile`/`.dockerignore`: `python:3.11-slim`, `uv` for
-      dependency install (this project's own tooling, via Astral's
-      official `COPY --from=ghcr.io/astral-sh/uv:latest` pattern, not
-      pip), a non-root user (with an explicit `chown` before the user
-      switch - files installed as root during the build aren't
-      automatically usable by a later non-root user, a common enough
-      Docker mistake worth guarding against explicitly), a volume at
+      New `src/agentic_rag/api/main.py`: a `create()` factory function
+      (`uvicorn agentic_rag.api.main:create --factory`), not a bare
+      module-level `app = create_app(Settings())` - the latter would run
+      `Settings()` validation as a side effect of merely *importing* the
+      module (3 independent review agents flagged this), crashing any
+      incidental import (a docs generator, a future blanket-import test)
+      even when nothing about actually running the app was intended.
+      `create()` defers that construction to when uvicorn's `--factory`
+      flag actually calls it, while still failing fast the moment it is
+      called.
+
+      New `Dockerfile`/`.dockerignore`: `python:3.11-slim` plus an
+      explicit `apt-get install libgomp1` (onnxruntime, a real
+      dependency of both fastembed and markitdown's magika file-type
+      detector, dynamically links `libgomp.so.1` at runtime without
+      bundling it - the slim base image doesn't ship it, so without
+      this the first fastembed/magika model load, likely the first real
+      request, fails with `OSError: libgomp.so.1: cannot open shared
+      object file`), `uv` for dependency install (this project's own
+      tooling, via Astral's official `COPY --from=ghcr.io/astral-sh/
+      uv:latest` pattern, not pip, with the `--frozen`/`--no-dev`/
+      `--no-install-project` layer-caching split), a non-root user (with
+      `/app/data` explicitly `mkdir -p`'d *before* the recursive `chown`
+      - `VOLUME` auto-creating a not-yet-existing directory isn't
+      guaranteed to preserve the preceding user switch's ownership,
+      which would otherwise leave a fresh volume root-owned and
+      unwritable by `appuser` at `docker run` time), an `ENV PATH="/app
+      /.venv/bin:${PATH}"` so the venv resolves first, a volume at
       `/app/data` for Qdrant's embedded storage + the sync snapshot to
       persist across restarts, and a `HEALTHCHECK` deliberately pointed
       at `/health` (liveness) rather than `/health/ready` - routing a
       container-restart signal at dependency reachability would mark a
       perfectly fine container "unhealthy" the moment Ollama is
       transiently unreachable, a query-time problem, not a
-      restart-worthy one. New README.md "Deployment" section documents
-      build/run commands, the host-Ollama networking difference between
-      Docker Desktop and Linux, and states the untested-build caveat
-      plainly rather than only in this tracker entry.
+      restart-worthy one. `CMD` invokes `uvicorn` directly (not through
+      `uv run uvicorn ...`) so it lands as PID 1 and receives signals
+      straight from the kernel - uv's own maintainers document that
+      `uv run` does not `execve()`-replace itself with the spawned
+      process, and multiple upstream reports (astral-sh/uv#7343,
+      #12830, #11886, #8654, #12108) describe its SIGTERM/SIGINT
+      forwarding to a child as unreliable, which could leave `docker
+      stop` blocking for the full grace period before a SIGKILL. New
+      README.md "Deployment" section documents build/run commands, the
+      host-Ollama networking difference between Docker Desktop and
+      Linux, and states the untested-build caveat plainly rather than
+      only in this tracker entry.
 
-      9 new tests (5 for `/health/ready`'s success/Qdrant-down/
-      Ollama-down/both-down/timeout-is-configured cases, 1 confirming
-      `/health` liveness is unaffected by a broken Qdrant, 2 for the new
-      `readiness_check_timeout_seconds` setting, 2 for the new
-      `api/main.py` module - exposes a working ASGI app, and fails fast
-      with a clear error when `WATCHED_FOLDER_PATH` is missing rather
-      than failing confusingly on the first request). Full suite: 473
-      passed, 0 failures. **Live-verified** everything that doesn't
-      require Docker itself: `/health/ready` against a real running app
-      with real Qdrant + real Ollama (200, both checks `"ok"`) and again
-      with Ollama pointed at a closed port (503, `checks.ollama` names
-      the real connection error, `checks.qdrant` still `"ok"`); the new
-      `api/main.py` entry point via a real `uvicorn agentic_rag.api.main
-      :app` process serving real HTTP requests end-to-end. The
-      Dockerfile/image build itself remains genuinely unverified - the
-      one piece of this task Docker's absence made impossible to prove.
+      This PR went through this session's standard 8-angle
+      `/code-review` skill pass plus a 9th, dedicated agent specifically
+      to manually audit the Dockerfile against known Docker/uv
+      conventions (the skill's 8 angles don't map cleanly onto
+      Dockerfile-specific concerns, and the Dockerfile was the one
+      artifact nothing else - tests, live-verification - could check).
+      That 9th pass produced the highest-value findings of the whole
+      review: the missing `libgomp1`, the `VOLUME`-before-`mkdir`
+      ownership gap, and the `uv run`-as-PID-1 signal-forwarding risk.
+      10 findings total were confirmed and fixed before merge: the 3
+      Dockerfile issues above, the module-level `Settings()`
+      construction (3 agents independently flagged this), the
+      `collection_exists()` boolean discarded, the Ollama check hitting
+      the bare base URL instead of `/api/tags` (2 agents flagged this),
+      asymmetric exception handling between the two checks, the missing
+      `gt=0` on `readiness_check_timeout_seconds`, the string-sentinel
+      readiness decision, and `.env.example` missing the new setting.
+
+      14 new tests vs. `main` (0 removed; also refactored onto two new
+      shared helpers, `_app_with_broken_qdrant`/`_mock_ollama_healthy`,
+      to cut duplication): 9 for `/health/ready` (all-reachable,
+      hits-`/api/tags`-not-the-bare-root, Qdrant-collection-missing,
+      Qdrant-unreachable, Ollama-unreachable, Ollama-non-request-
+      exception, both-down, timeout-is-configured, and confirming
+      `/health` liveness is unaffected), 2 for the `api/main.py`
+      `create()` factory (working ASGI app, fails fast without
+      `WATCHED_FOLDER_PATH`), and 3 for `readiness_check_timeout_seconds`
+      (default, env-overridable, `gt=0` rejection). Full suite: 477
+      passed, 0 failures, after the fix pass.
+      **Live-verified** everything that doesn't require Docker itself:
+      `/health/ready` against a real running app with real Qdrant + real
+      Ollama (200, both checks `"ok"`) and again with Ollama pointed at
+      a closed port (503, `checks.ollama` names the real connection
+      error, `checks.qdrant` still `"ok"`); the new `api/main.py:create`
+      factory via a real `uvicorn agentic_rag.api.main:create --factory`
+      process serving real HTTP requests end-to-end. The Dockerfile/
+      image build itself remains genuinely unverified - the one piece of
+      this task Docker's absence made impossible to prove.
 
 ---
 

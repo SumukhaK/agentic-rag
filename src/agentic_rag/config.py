@@ -23,7 +23,9 @@ class Settings(BaseSettings):
     # "can this reach Ollama right now," not to wait as long as a real
     # embedding/generation call would; a slow readiness check defeats
     # its own purpose (a container orchestrator polling it frequently).
-    readiness_check_timeout_seconds: int = 3
+    # gt=0 matches sync_interval_seconds' own guard: requests.get(...,
+    # timeout=0) has unpredictable behavior rather than failing fast.
+    readiness_check_timeout_seconds: int = Field(default=3, gt=0)
     embedding_model: str = "nomic-embed-text"
     embedding_timeout_seconds: int = 30
     embedding_dimensions: int = 768

@@ -115,6 +115,14 @@ def test_settings_readiness_check_timeout_seconds_overridable_from_env(monkeypat
     assert settings.readiness_check_timeout_seconds == 5
 
 
+def test_settings_rejects_a_zero_readiness_check_timeout_seconds(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("READINESS_CHECK_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_settings_defaults_qdrant_settings(monkeypatch):
     monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
     for key in ("EMBEDDING_DIMENSIONS", "QDRANT_STORAGE_PATH", "QDRANT_COLLECTION_NAME"):

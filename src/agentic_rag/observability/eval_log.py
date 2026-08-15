@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TextIO
 
 from agentic_rag.observability.logging_setup import configure_json_logging
@@ -56,6 +57,15 @@ def log_evaluation_run(
     `average_duration_seconds` (the mean of individual questions'
     `duration_seconds`, itself already inclusive of errored questions -
     see `report.py::build_report()`'s own docstring).
+
+    `report_id` (`Path(report_path).stem`, e.g. `eval-20260815T153329`)
+    is included alongside `report_path` - `report_path` is a full,
+    environment-specific filesystem path (different on every machine/
+    container that runs an eval), while `report_id` is a portable
+    correlation key that stays meaningful even if logs get shipped
+    somewhere the local report file isn't reachable from. Derived from
+    `report_path` rather than passed separately, so the two can never
+    drift out of sync with each other.
     """
     payload = {
         "event": "evaluation_run",
@@ -65,6 +75,7 @@ def log_evaluation_run(
         "hallucination_rate": hallucination_rate,
         "errored_count": errored_count,
         "average_duration_seconds": average_duration_seconds,
+        "report_id": Path(report_path).stem,
         "report_path": report_path,
         "run_duration_seconds": run_duration_seconds,
     }

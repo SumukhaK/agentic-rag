@@ -556,12 +556,13 @@ def test_main_configures_logging_before_running_the_evaluation(
     mock_configure.assert_called_once()
 
 
+@patch("agentic_rag.evaluation.runner.time.monotonic", side_effect=[100.0, 145.5])
 @patch("agentic_rag.evaluation.runner.log_evaluation_run")
 @patch("agentic_rag.evaluation.runner.configure_eval_logging")
 @patch("agentic_rag.evaluation.runner.run_evaluation")
 @patch("agentic_rag.evaluation.runner.Settings")
 def test_main_logs_the_run_with_the_reports_metrics_and_report_path(
-    mock_settings_cls, mock_run_evaluation, mock_configure, mock_log_run, tmp_path
+    mock_settings_cls, mock_run_evaluation, mock_configure, mock_log_run, mock_monotonic, tmp_path
 ):
     mock_settings_cls.return_value = _settings(tmp_path)
     mock_run_evaluation.return_value = _dummy_report()
@@ -576,4 +577,4 @@ def test_main_logs_the_run_with_the_reports_metrics_and_report_path(
     assert kwargs["errored_count"] == 0
     assert kwargs["average_duration_seconds"] == 76.7
     assert kwargs["report_path"].endswith(".json")
-    assert kwargs["run_duration_seconds"] >= 0.0
+    assert kwargs["run_duration_seconds"] == 45.5

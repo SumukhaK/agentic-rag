@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -16,8 +15,6 @@ from agentic_rag.ingestion.snapshot_store import save_snapshot
 from agentic_rag.ingestion.sync import sync_folder
 from agentic_rag.ingestion.watcher import FileState
 from agentic_rag.observability.sync_log import log_sync_cycle, log_sync_cycle_error
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -294,6 +291,15 @@ async def run_sync_loop(
                     ingestion_failure_count=len(result.ingestion_failures),
                     indexing_failure_count=len(result.indexing_failures),
                     deletion_failure_count=len(result.deletion_failures),
+                    ingestion_failure_paths=[
+                        f.relative_path for f in result.ingestion_failures
+                    ],
+                    indexing_failure_paths=[
+                        f.relative_path for f in result.indexing_failures
+                    ],
+                    deletion_failure_paths=[
+                        f.relative_path for f in result.deletion_failures
+                    ],
                     duration_seconds=time.monotonic() - cycle_start,
                 )
         await asyncio.sleep(settings.sync_interval_seconds)

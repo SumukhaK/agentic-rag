@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
+import traceback
 from datetime import datetime, timezone
 from typing import TextIO
 
@@ -34,17 +36,27 @@ def log_sync_cycle(
     ingestion_failure_count: int,
     indexing_failure_count: int,
     deletion_failure_count: int,
+    ingestion_failure_paths: list[str],
+    indexing_failure_paths: list[str],
+    deletion_failure_paths: list[str],
     duration_seconds: float,
 ) -> None:
     """Emit one structured JSON log line summarizing one completed
     `run_sync_cycle()` call (`ingestion/scheduler.py`).
 
-    Counts only, not the actual paths - unlike `request_log.py`'s
-    `cited_paths` (a handful of citations for one request), a sync cycle
-    at target scale (10,000+ documents) could touch a number of paths
-    large enough to make a single log line unwieldy; a reader who needs
-    the exact paths for a failure already has `IngestionFailure.reason`
-    surfaced through the existing `SyncCycleResult` the caller holds.
+    Successfully indexed/deleted paths are counts only, not the actual
+    paths - at target scale (10,000+ documents) a cycle could touch a
+    number of paths large enough to make a single log line unwieldy, and
+    "how many changed" is what matters for a healthy cycle. Failure
+    paths are the opposite: failures are rare by design (every per-
+    document/deletion step is already isolated - see `run_sync_cycle()`'s
+    own docstring), and *which* document failed is exactly what a reader
+    needs to actually debug it - the same "a reader debugging why needs
+    to see what it flagged" reasoning `request_log.py`'s `cited_paths`
+    already applies to a flagged answer. Without this, a document
+    silently failing every cycle would show only `indexing_failure_
+    count: 1` forever, with no way to identify which of 10,000 files it
+    is short of reproducing the run locally.
     """
     payload = {
         "event": "sync_cycle",
@@ -54,6 +66,9 @@ def log_sync_cycle(
         "ingestion_failure_count": ingestion_failure_count,
         "indexing_failure_count": indexing_failure_count,
         "deletion_failure_count": deletion_failure_count,
+        "ingestion_failure_paths": ingestion_failure_paths,
+        "indexing_failure_paths": indexing_failure_paths,
+        "deletion_failure_paths": deletion_failure_paths,
         "duration_seconds": duration_seconds,
     }
     _logger.info(json.dumps(payload))
@@ -71,18 +86,24 @@ def log_sync_cycle_error(*, error: str, duration_seconds: float) -> None:
     that into zeros would misrepresent "the cycle didn't run" as "the
     cycle ran and did nothing."
 
-    Logged at `ERROR` level with `exc_info=True` - this must only be
-    called from inside an active `except` block (matching every call
-    site in `ingestion/scheduler.py`), so Python's logging picks up the
-    real traceback via `sys.exc_info()` and appends it after the JSON
-    line, preserving the diagnostic value the previous plain
-    `logger.exception("sync cycle failed")` call provided, on top of the
-    new structured summary.
+    The traceback of the current exception (if any) is embedded as a
+    `traceback` field in the JSON payload itself, rather than relying on
+    `logging`'s own `exc_info=True` handling - that appends the
+    formatted traceback as extra, non-JSON lines *after* the message,
+    breaking the "one JSON line per event" contract every other call in
+    this module family keeps, and silently emits a bogus "NoneType:
+    None" traceback if this is ever called with no exception actually in
+    flight. `traceback.format_exc()` (via `sys.exc_info()`) is safe to
+    call either way: `None` when nothing is active, the real formatted
+    traceback when there is - preserving the diagnostic value the
+    previous plain `logger.exception("sync cycle failed")` call
+    provided, without breaking parseability.
     """
     payload = {
         "event": "sync_cycle_error",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "error": error,
         "duration_seconds": duration_seconds,
+        "traceback": traceback.format_exc() if sys.exc_info()[0] is not None else None,
     }
-    _logger.error(json.dumps(payload), exc_info=True)
+    _logger.error(json.dumps(payload))

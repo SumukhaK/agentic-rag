@@ -1,6 +1,7 @@
 import io
 import json
 import logging
+import os
 
 from agentic_rag.observability.eval_log import (
     LOGGER_NAME,
@@ -44,6 +45,7 @@ def test_log_evaluation_run_message_is_valid_json_with_expected_fields(caplog):
     assert payload["faithfulness_rate"] == 0.75
     assert payload["hallucination_rate"] == 0.167
     assert payload["errored_count"] == 0
+    assert payload["report_id"] == "eval-20260815T135022"
     assert payload["average_duration_seconds"] == 76.7
     assert payload["report_path"] == "eval/results/eval-20260815T135022.json"
     assert payload["run_duration_seconds"] == 460.2
@@ -73,6 +75,31 @@ def test_log_evaluation_run_allows_none_metrics_when_nothing_was_scored():
     assert payload["faithfulness_rate"] is None
     assert payload["hallucination_rate"] is None
     assert payload["average_duration_seconds"] is None
+
+
+def test_log_evaluation_run_derives_report_id_from_a_nested_path():
+    # report_id is a portable correlation key derived from Path(...).stem
+    # - os.sep, not a hardcoded separator, matches whatever this test's
+    # own platform actually uses (Path parses backslash as a separator
+    # only on Windows), avoiding the exact "hardcoded separator vs. the
+    # platform's real one" bug class this codebase has hit before
+    # (evaluation/runner.py's own _normalize_path()).
+    stream = io.StringIO()
+    configure_eval_logging(stream=stream)
+
+    report_path = os.sep.join(["eval", "results", "eval-20260815T153329.json"])
+    log_evaluation_run(
+        retrieval_precision=1.0,
+        faithfulness_rate=1.0,
+        hallucination_rate=0.0,
+        errored_count=0,
+        average_duration_seconds=10.0,
+        report_path=report_path,
+        run_duration_seconds=60.0,
+    )
+
+    payload = json.loads(stream.getvalue().strip())
+    assert payload["report_id"] == "eval-20260815T153329"
 
 
 def test_configure_eval_logging_writes_json_lines_to_the_given_stream():

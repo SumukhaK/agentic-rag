@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import os
 import threading
 import time
@@ -10,6 +11,7 @@ from agentic_rag.config import Settings
 from agentic_rag.embedding.sparse_client import SparseEmbeddingError, embed_sparse_texts
 from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
 from agentic_rag.indexing.upsert import _path_filter
+from agentic_rag.ingestion.pipeline import IngestionFailure
 from agentic_rag.ingestion.scheduler import SyncCycleResult, run_sync_cycle, run_sync_loop
 from agentic_rag.ingestion.watcher import FileState, snapshot
 
@@ -439,20 +441,23 @@ def test_run_sync_loop_continues_after_a_cycle_raises(
     assert mock_run_cycle.call_count == 2
 
 
+@patch("agentic_rag.ingestion.scheduler.time.monotonic", side_effect=itertools.count(0, 1))
 @patch("agentic_rag.ingestion.scheduler.log_sync_cycle")
 @patch("agentic_rag.ingestion.scheduler.save_snapshot")
 @patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
 @patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
 def test_run_sync_loop_logs_a_completed_cycle_with_changes(
-    mock_run_cycle, mock_sleep, mock_save_snapshot, mock_log_cycle, tmp_path
+    mock_run_cycle, mock_sleep, mock_save_snapshot, mock_log_cycle, mock_monotonic, tmp_path
 ):
-    # duration_seconds isn't asserted to an exact value - asyncio's own
-    # internals call time.monotonic() an implementation-detail number of
-    # times around awaiting the shielded cycle future, so only this
-    # function's own two calls (cycle start/end) are guaranteed to be in
-    # the sequence, not which two. Real, unmocked time.monotonic() here
-    # is fine (unlike asserting an exact duration would be) - the loop
-    # itself finishes near-instantly since run_sync_cycle is mocked.
+    # time.monotonic() is mocked to a deterministic counting sequence,
+    # not left to the real clock - CLAUDE.md forbids real wall-clock
+    # reliance in tests. duration_seconds still isn't asserted to an
+    # exact value: asyncio's own internals also call time.monotonic() an
+    # implementation-detail number of times around awaiting the shielded
+    # cycle future, so only this function's own two calls (cycle
+    # start/end) are guaranteed to be in the sequence, not which two -
+    # an infinite counter (rather than a fixed-length list) tolerates
+    # that extra, uncounted consumption without running out of values.
     result = SyncCycleResult(
         indexed=["a.md"],
         deleted=[],
@@ -477,6 +482,9 @@ def test_run_sync_loop_logs_a_completed_cycle_with_changes(
     assert kwargs["ingestion_failure_count"] == 0
     assert kwargs["indexing_failure_count"] == 0
     assert kwargs["deletion_failure_count"] == 0
+    assert kwargs["ingestion_failure_paths"] == []
+    assert kwargs["indexing_failure_paths"] == []
+    assert kwargs["deletion_failure_paths"] == []
     assert kwargs["duration_seconds"] >= 0.0
 
 
@@ -503,12 +511,42 @@ def test_run_sync_loop_does_not_log_a_no_op_cycle(
     mock_log_cycle.assert_not_called()
 
 
+@patch("agentic_rag.ingestion.scheduler.time.monotonic", side_effect=itertools.count(0, 1))
+@patch("agentic_rag.ingestion.scheduler.log_sync_cycle")
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
+@patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
+@patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
+def test_run_sync_loop_logs_failure_paths_not_just_counts(
+    mock_run_cycle, mock_sleep, mock_save_snapshot, mock_log_cycle, mock_monotonic, tmp_path
+):
+    result = SyncCycleResult(
+        indexed=[],
+        deleted=[],
+        ingestion_failures=[],
+        indexing_failures=[IngestionFailure(relative_path="tier-1/bad.md", reason="boom")],
+        deletion_failures=[],
+    )
+    mock_run_cycle.side_effect = [(result, {})]
+    mock_sleep.side_effect = [asyncio.CancelledError()]
+    settings = _loop_settings(tmp_path)
+
+    async def _run():
+        with pytest.raises(asyncio.CancelledError):
+            await run_sync_loop(settings=settings, client=object())
+
+    asyncio.run(_run())
+
+    kwargs = mock_log_cycle.call_args.kwargs
+    assert kwargs["indexing_failure_paths"] == ["tier-1/bad.md"]
+
+
+@patch("agentic_rag.ingestion.scheduler.time.monotonic", side_effect=itertools.count(0, 1))
 @patch("agentic_rag.ingestion.scheduler.log_sync_cycle_error")
 @patch("agentic_rag.ingestion.scheduler.save_snapshot")
 @patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
 @patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
 def test_run_sync_loop_logs_a_cycle_error(
-    mock_run_cycle, mock_sleep, mock_save_snapshot, mock_log_error, tmp_path
+    mock_run_cycle, mock_sleep, mock_save_snapshot, mock_log_error, mock_monotonic, tmp_path
 ):
     mock_run_cycle.side_effect = [RuntimeError("boom"), (_empty_result(), {})]
     mock_sleep.side_effect = [None, asyncio.CancelledError()]

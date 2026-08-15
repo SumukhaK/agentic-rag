@@ -1353,8 +1353,106 @@ building unwired infrastructure to fill the slot.
 
 ## Phase 8 — Evaluation, Observability & Production Readiness
 
-- [ ] Structured evaluation: retrieval precision, faithfulness, hallucination
-      rate (Claude as judge)
+- [x] Structured evaluation: retrieval precision, faithfulness, hallucination
+      rate — own PR, `feat/structured-evaluation`. `docs/REQUIREMENTS.md`'s
+      own Open Items explicitly blocked this on two missing things: an
+      `ANTHROPIC_API_KEY` and a written spec for what gets judged and how.
+
+      **Judge model pivoted away from Claude, decided with the user.**
+      No `ANTHROPIC_API_KEY` is configured for this project. The user
+      proposed a local open-weight model instead - "bigger than mistral,
+      not as frontier as Claude." This machine's actual GPU
+      (`nvidia-smi`: GTX 1650 Ti, **4GB VRAM**) turned out to be the real
+      constraint - the same hardware behind this session's repeated
+      Ollama GPU-OOM incidents with even a 7B model, ruling out anything
+      27B+ outright. Landed on **`qwen2.5:14b-instruct`**, pulled (~9GB)
+      and live-verified on this hardware before committing to it: ~39s
+      cold load (partial CPU offload), ~4s warm inference thereafter -
+      acceptable since eval runs are offline/batch, not on `POST /query`'s
+      live path. Pinned to its own `evaluation_temperature=0.0`, not
+      reusing `judge_temperature`, for the same reproducibility reasoning
+      `generation_temperature` was already split out for.
+
+      **Not everything needs a judge call - only what's genuinely a
+      judgment call does.** Proposed to the user and approved before
+      writing any code:
+      - **Retrieval precision** - deterministic. `eval/questions.json`
+        carries hand-curated ground-truth `expected_source_paths` per
+        question; precision = fraction where an expected source is among
+        the actual citations.
+      - **Faithfulness** - the one genuinely subjective dimension, so
+        the only one that goes through the judge. New
+        `evaluation/judge.py::check_faithfulness()` reuses
+        `orchestration/judge.py`'s existing `run_judge()`/
+        `classify_verdict()` (the same CLEAN-vs-flagged pattern the three
+        production judges already use) rather than a fourth bespoke judge
+        implementation. Deliberately skips `has_forged_verdict()` - that's
+        an adversarial-user defense for the live request path; an eval run
+        judges the system's own output against a trusted, hand-written
+        corpus offline, with no untrusted party in the loop.
+      - **Hallucination rate** - mostly deterministic. A dedicated subset
+        of questions is marked `expected_answerable: false`; hallucination
+        = the system fabricating an answer instead of returning the
+        canonical fallback, plus any answerable question judged unfaithful.
+        A question that *should* have been answerable but got the fallback
+        instead is neither - that's a retrieval miss, not hallucination,
+        and the two are never conflated.
+
+      **New pieces**: `eval/corpus/` (4 small, real football documents
+      across tier-1/tier-2), `eval/questions.json` (6 hand-curated
+      questions, 4 answerable + 2 deliberately not), and a new
+      `src/agentic_rag/evaluation/` subpackage - `questions.py` (loader,
+      rejects a duplicate `id` or an `expected_answerable` question with
+      no `expected_source_paths` to check precision against),
+      `judge.py` (`check_faithfulness()`), `report.py` (pure aggregation:
+      `build_report()`, `report_to_json_dict()`), `runner.py`
+      (`run_evaluation()` - indexes `eval/corpus/` into a *separate*
+      Qdrant collection via `run_sync_cycle()` (`ingestion/scheduler.py`
+      - the exact code path the background sync job uses in production,
+      not a fourth reimplementation of indexing), then answers every
+      question through the real `answer_with_cache()`). CLI entry point:
+      `python -m agentic_rag.evaluation.runner`, writing a timestamped
+      JSON report to `eval/results/` (gitignored - run output, not a
+      fixture) and printing the three summary metrics.
+
+      Plain JSON for the question set, not YAML - no new dependency for a
+      flat list of short records with no nested structure, matching this
+      session's stdlib-first bias throughout (`tomllib`,
+      `importlib.metadata`, no `pytest-asyncio`).
+
+      **A real bug found via the live end-to-end run, not the mocked
+      tests** - the mocked unit tests all constructed `AnswerResult` with
+      the exact `CANNOT_ANSWER_MESSAGE` literal, so they never exercised
+      this: `_run_question()`'s `answered` check originally used exact
+      string equality (`answer.text != CANNOT_ANSWER_MESSAGE`) instead of
+      `answer_with_cache()`'s own established convention (substring
+      containment). The real generation model sometimes wraps the
+      fallback in a leading space (`" I do not know..."`), which the
+      exact-equality check failed to recognize as the fallback at all -
+      silently miscounting a correct "I don't know" as hallucination. A
+      first live run measured `hallucination_rate: 0.5`; fixed to use
+      `CANNOT_ANSWER_MESSAGE not in answer.text` (matching the existing
+      convention exactly), with a regression test reproducing the leading-
+      space case, the corrected re-run measured `hallucination_rate:
+      0.167` - one genuine faithfulness flag, not three phantom ones.
+
+      **A live-observed judge-calibration data point, not a code bug,
+      recorded rather than silently smoothed over**: the one faithfulness
+      flag in the corrected run (`q3-debruyne-injury`) reads, on manual
+      inspection, like a fair paraphrase of its cited source ("suffered a
+      hamstring injury on 10 February 2025" vs. the source's "...during
+      training on 10 February 2025") - the judge appears to have flagged
+      the omission of "during training" as unsupported rather than
+      merely-less-detailed. One example isn't enough evidence to redesign
+      the judge prompt (the three production judges only got hardened
+      after live-testing against many repros, not one), but it's worth
+      tracking if this pattern recurs across future eval runs.
+
+      30 new tests across `tests/evaluation/`. Full suite: 408 passed,
+      0 failures. **Live-verified end-to-end** against the real corpus,
+      real Ollama (`mistral` generation, `qwen2.5:14b-instruct` judging),
+      and real embedded Qdrant: `retrieval_precision: 1.0`,
+      `faithfulness_rate: 0.75`, `hallucination_rate: 0.167`.
 - [ ] Logging/tracing across the pipeline
 - [ ] Load test at target scale (10,000 docs × ~50 pages)
 - [ ] Deployment hardening (containerization, health checks)

@@ -37,3 +37,11 @@ class Settings(BaseSettings):
     rewrite_temperature: float = 0.0
     decompose_temperature: float = 0.0
     decompose_retry_temperature: float = 0.4
+    evaluation_model: str = "qwen2.5:14b-instruct"
+    evaluation_temperature: float = 0.0
+    evaluation_timeout_seconds: int = 120
+    evaluation_corpus_path: Path = Path("./eval/corpus")
+    evaluation_questions_path: Path = Path("./eval/questions.json")
+    evaluation_qdrant_storage_path: Path = Path("./eval/qdrant")
+    evaluation_qdrant_collection_name: str = "eval_documents"
+    evaluation_results_path: Path = Path("./eval/results")

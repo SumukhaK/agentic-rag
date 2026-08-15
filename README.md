@@ -456,6 +456,28 @@ Shipped so far (`src/agentic_rag/api/`):
   dropped. 27 new tests, **live-verified end-to-end twice** (normal
   index/edit/delete flow, and the restart/deletion-detection scenario).
   Full suite: 378 passed, 0 failures.
+- **Structured evaluation (Phase 8)** — blocked by `docs/REQUIREMENTS.md`'s
+  own Open Items on an `ANTHROPIC_API_KEY` and a written spec, neither of
+  which existed. Pivoted away from Claude with the user: this machine's
+  actual GPU (4GB VRAM) ruled out anything 27B+, so **`qwen2.5:14b-instruct`**
+  was pulled and live-verified (~39s cold load, ~4s warm) before being
+  adopted as the judge. Only faithfulness — the one genuinely subjective
+  dimension — goes through the judge (reusing `orchestration/judge.py`'s
+  existing `run_judge()`); retrieval precision and most of hallucination
+  rate are measured deterministically against a hand-curated
+  `eval/questions.json` with ground-truth expected sources. New
+  `src/agentic_rag/evaluation/` subpackage indexes `eval/corpus/` via
+  `run_sync_cycle()` — the same code path the background sync job uses in
+  production — then answers every question through the real
+  `answer_with_cache()`. **A real bug found by the live run, not the
+  mocked tests**: the "did it answer" check used exact string equality
+  against the canonical fallback instead of the substring-containment
+  convention `answer_with_cache()` itself already uses, so a fallback the
+  model wrapped in a leading space was miscounted as a hallucination — a
+  first live run measured `hallucination_rate: 0.5`, the fix (with a
+  regression test) brought it to the correct `0.167`. 30 new tests, full
+  suite 408 passed. Live-verified end-to-end: `retrieval_precision: 1.0`,
+  `faithfulness_rate: 0.75`, `hallucination_rate: 0.167`.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

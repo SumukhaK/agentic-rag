@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +10,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     watched_folder_path: Path
+    # gt=0, not >=0: asyncio.sleep() silently treats 0/negative as "don't
+    # sleep at all", which would turn the background sync loop into an
+    # unthrottled busy-loop hammering the filesystem/Ollama/Qdrant forever.
+    sync_interval_seconds: float = Field(default=60.0, gt=0)
+    sync_snapshot_path: Path = Path("./data/sync_snapshot.json")
     chunk_size_chars: int = 2000
     access_tiers: list[str] = ["tier-1", "tier-2", "tier-3"]
     ollama_base_url: str = "http://localhost:11434"

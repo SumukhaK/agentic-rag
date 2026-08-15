@@ -315,3 +315,34 @@ def test_settings_rewrite_and_decompose_temperatures_overridable_from_env(monkey
     assert settings.rewrite_temperature == 0.1
     assert settings.decompose_temperature == 0.2
     assert settings.decompose_retry_temperature == 0.6
+
+
+def test_settings_defaults_sync_interval_seconds(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("SYNC_INTERVAL_SECONDS", raising=False)
+
+    settings = Settings()
+
+    assert settings.sync_interval_seconds == 60.0
+
+
+def test_settings_rejects_a_non_positive_sync_interval_seconds(monkeypatch):
+    # asyncio.sleep() silently treats 0/negative as "don't sleep at all" -
+    # left unvalidated, a misconfigured 0 would turn the background sync
+    # loop into an unthrottled busy-loop.
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+
+    with pytest.raises(ValidationError):
+        Settings(sync_interval_seconds=0, _env_file=None)
+
+    with pytest.raises(ValidationError):
+        Settings(sync_interval_seconds=-1, _env_file=None)
+
+
+def test_settings_defaults_sync_snapshot_path(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("SYNC_SNAPSHOT_PATH", raising=False)
+
+    settings = Settings()
+
+    assert settings.sync_snapshot_path == Path("./data/sync_snapshot.json")

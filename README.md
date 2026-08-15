@@ -419,6 +419,43 @@ Shipped so far (`src/agentic_rag/api/`):
   public 422 description no longer leaks internal implementation
   narration into the schema API consumers see. Full suite after fixes:
   346 passed, 0 skipped, 0 failures.
+- **Background sync job (FR4)** — `sync_folder()` (Phase 1) already
+  detected changes on disk; new `ingestion/scheduler.py` propagates them
+  to the index on a schedule, as an `asyncio.Task` inside `api/app.py`'s
+  `lifespan` (same process, not a separate worker — Qdrant's embedded
+  mode is single-process and locked). Raised to the user first (per
+  `docs/REQUIREMENTS.md`'s own explicit flag): a fresh `EmbeddingCache`
+  per cycle, not one for the process lifetime, to bound memory at target
+  scale.
+  **Self-review found a cluster of real bugs, not polish**: (1) a
+  document or deletion that failed once was silently dropped forever,
+  never retried — `sync_folder()`'s disk-only snapshot has no idea
+  indexing failed, so it was carried forward unmodified and never
+  diffed as changed again; fixed by reverting a failed path's snapshot
+  entry so the next cycle retries it. (2) a restart could never detect
+  a deletion that happened while the process was down — not just
+  wasteful re-indexing, a silent, permanent FR4 violation, since an
+  empty starting snapshot can never report anything as deleted; fixed
+  with new `ingestion/snapshot_store.py` persisting the snapshot to
+  disk between restarts, live-verified by deleting a file while the app
+  was "down" and confirming the very next cycle after restart caught it.
+  (3) a genuine use-after-close shutdown race — cancelling
+  `asyncio.to_thread()` doesn't wait for the underlying thread, so
+  `client.close()` could run while an orphaned thread was still writing
+  to it; fixed with a cooperative `stop_event` plus `asyncio.shield()`.
+  **The first attempt at fix (3) itself deadlocked** — a
+  `threading.Event`-based design hung forever whenever cancellation
+  landed before the work had even started (common for a fast, no-op
+  cycle), producing a real 9.6-hour stuck background process during
+  this session, root-caused via `faulthandler` stack traces rather than
+  guessed, and fixed by switching to `asyncio.shield()`. Two more
+  findings — no thread-lock protecting Qdrant's embedded client from
+  concurrent sync-thread writes and query-thread reads, and fully
+  serial (non-concurrent) embedding on cold start — were confirmed real
+  but deliberately left unfixed as out of scope, recorded rather than
+  dropped. 27 new tests, **live-verified end-to-end twice** (normal
+  index/edit/delete flow, and the restart/deletion-detection scenario).
+  Full suite: 378 passed, 0 failures.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

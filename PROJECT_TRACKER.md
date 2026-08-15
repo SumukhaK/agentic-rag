@@ -1201,7 +1201,155 @@ building unwired infrastructure to fill the slot.
       Full suite after fixes: 346 passed, 0 skipped, 0 failures (Ollama
       recovered during this task, so every previously-skipped live
       fixture ran too).
-- [ ] Background sync job for near-real-time index freshness (FR4)
+- [x] Background sync job for near-real-time index freshness (FR4) — own
+      PR, `feat/background-sync-job`. `sync_folder()` (`ingestion/sync.py`)
+      already detected what changed on disk since Phase 1, but its own
+      docstring flagged that propagating those changes to the index and
+      running on a schedule were "a scheduling concern for later
+      (Phase 7)" - this is that concern.
+
+      **Design decision raised to the user first, per `docs/REQUIREMENTS.md`'s
+      own explicit flag**: `EmbeddingCache`'s Phase 2 notes stated "one
+      cache per sync cycle vs. one for the process lifetime... needs a
+      decision when Phase 7 is designed, not an assumption baked in
+      here." Presented both options with their tradeoffs; the user chose
+      **fresh cache per cycle** - bounds memory at target scale
+      (10,000+ docs) rather than risk unbounded growth over days/weeks of
+      uptime.
+
+      **New modules**: `ingestion/scheduler.py` (`run_sync_cycle()`,
+      `run_sync_loop()`) and `ingestion/snapshot_store.py`
+      (`load_snapshot()`/`save_snapshot()`). Wired into `api/app.py`'s
+      `lifespan` as a background `asyncio.Task` sharing the process -
+      Qdrant's embedded/on-disk-locked mode rules out a separate worker
+      process. New `Settings.sync_interval_seconds` (default 60s,
+      `gt=0` - `asyncio.sleep()` silently no-ops on 0/negative, which
+      would otherwise busy-loop) and `Settings.sync_snapshot_path`.
+
+      **Self-review (7 finder angles, high effort) found a cluster of
+      real correctness bugs in the first implementation - not polish,
+      bugs that would have quietly undermined FR4's own guarantee.**
+      Two were serious enough that fixing them meaningfully reshaped the
+      design from what was first merged-in-spirit to what's actually in
+      this PR:
+
+      1. **A document or deletion that failed once was silently dropped
+      forever, never retried.** `sync_folder()`'s `current_snapshot` is
+      computed purely from disk state - it has no idea whether
+      `index_document()`/`delete_document()` actually succeeded.
+      Returning it unmodified as the next cycle's `previous_snapshot`
+      meant a path that failed once (a transient Ollama timeout, a
+      Qdrant error) was "seen" and never diffed as changed again, since
+      its on-disk fingerprint never moved - directly undermining the
+      "one bad thing doesn't stall everything else" isolation the design
+      already had for *other* documents in the same cycle, while quietly
+      breaking the *retry* half of that promise for the failed one.
+      Fixed: `run_sync_cycle()` now reverts every failed (or, with a
+      `stop_event` set, not-yet-attempted) path's entry in the returned
+      snapshot back to its `previous_snapshot` value (or removes it if
+      absent there), so the next cycle's diff sees a mismatch and
+      retries it - proven with dedicated tests that a persistently
+      failing path is retried, not just failed once and forgotten.
+      `SyncCycleResult.indexing_failures` was also split from a new
+      `deletion_failures` field, since a caller alerting on the two
+      probably wants to tell them apart.
+
+      2. **A process restart could never detect a deletion that
+      happened while it was down - not "wasteful," a real, permanent
+      FR4 violation.** The original design started every restart from an
+      empty in-memory snapshot. `diff_snapshots({}, current)` can never
+      report anything as deleted (`previous_paths - current_paths` is
+      always empty when `previous` is empty), so a file removed while
+      the process was down would never be detected as deleted, not even
+      on the very next cycle after restart - not merely a slower
+      re-index, a silent, permanent gap in exactly the guarantee this
+      feature exists to provide. Fixed: new `snapshot_store.py` persists
+      the snapshot to `Settings.sync_snapshot_path` (atomic write - temp
+      file + `Path.replace()`) after every cycle; `api/app.py`'s
+      `lifespan` loads it at startup. Live-verified directly: indexed two
+      files, shut the app down, deleted one file from disk while it was
+      "down," restarted, and confirmed the restart's first cycle detected
+      and propagated that deletion.
+
+      3. **A genuine use-after-close race on shutdown**, confirmed by
+      directly reproducing `asyncio.to_thread()`'s cancellation semantics
+      in a standalone script before trusting the fix: cancelling a task
+      awaiting `asyncio.to_thread()` delivers `CancelledError` to the
+      *awaiting coroutine* near-instantly, regardless of whether the
+      underlying thread has actually finished - a naive
+      `sync_task.cancel(); await sync_task; client.close()` could let
+      `client.close()` run while an orphaned thread was still mid-write
+      against that same client. Fixed with a `stop_event`
+      (`run_sync_cycle()` checks it between items, bounding shutdown to
+      roughly one item's worth of work) plus `asyncio.shield()` around
+      the cycle's future in `run_sync_loop()`, so cancellation can never
+      actually cancel the underlying work - only signal it to wrap up -
+      and the loop always waits for its real completion before letting
+      `CancelledError` propagate. `api/app.py`'s `finally` block was also
+      restructured into nested `try`/`finally` so `client.close()` runs
+      unconditionally, regardless of what cancelling/awaiting the sync
+      task does or raises.
+
+      **A subtlety inside fix #3 itself caused a real 9.6-hour hung
+      background process during this session** - worth recording
+      honestly since it directly shaped the final design, not just the
+      bug list. The first attempt at #3 used a plain `threading.Event`
+      set in the cycle's own `finally` block, waited on after
+      cancellation. That deadlocked forever whenever cancellation landed
+      *before* the cycle's work had actually started running (a
+      genuinely common case for a fast, no-op cycle) -
+      `concurrent.futures.Future.cancel()` succeeds for not-yet-started
+      work, so the cycle - and its `finally` - never ran at all, and
+      nothing ever set the event being waited on. Root-caused via
+      `faulthandler.dump_traceback_later()` producing an exact stack
+      trace (not guessed), both in an isolated test and again in a live
+      end-to-end script that reproduced the same hang. Replaced with
+      `asyncio.shield()`, which prevents the underlying future from ever
+      actually being cancelled - whether already running or still queued
+      - so waiting for its real result is always safe. Re-verified with
+      the same faulthandler technique (bounded, self-terminating runs)
+      and the same live end-to-end script, both clean.
+
+      **Two findings surfaced but deliberately not applied, both real and
+      explicitly flagged rather than silently dropped**: (a) no
+      `threading.Lock` exists anywhere in `qdrant-client`'s local/embedded
+      mode protecting concurrent multi-threaded read/write against the
+      same collection - confirmed by reading `QdrantLocal`'s actual
+      source, not assumed - so the sync thread's writes and `/query`'s
+      request-thread reads against the same shared client are technically
+      unguarded. Not fixed here: a real fix would mean plumbing a lock
+      through `query.py`'s whole retrieval call chain, well outside a
+      background-sync-job PR's scope. (b) Cold-start (a fresh corpus, or
+      any restart today) indexes every changed document *sequentially*,
+      one Ollama round-trip at a time, unlike the `ThreadPoolExecutor`
+      pattern this codebase already uses for independent Ollama calls
+      elsewhere (`hybrid_search()`, `_screen_input()`) - a real bottleneck
+      at target scale (10,000+ docs) that (b) compounds with the
+      already-fixed restart behavior. Not added here: a genuine
+      performance feature, not a bug fix, and out of scope for the same
+      reason. Both recorded here so they aren't lost, not just implied.
+
+      **On "deletions reflected immediately" (§2/FR4)**: read as
+      "propagation is immediate once a cycle detects it" (a plain Qdrant
+      delete needs no embedding, unlike an edit) rather than "detection
+      is instant" - both edits and deletions are detected at the same
+      `sync_interval_seconds` polling cadence, since `sync_folder()`
+      diffs both in one pass. No stricter interpretation is stated
+      anywhere in `docs/REQUIREMENTS.md`.
+
+      No `pytest-asyncio` dependency added for testing `run_sync_loop()` -
+      each test wraps its coroutine body in `asyncio.run()` from a plain
+      sync test function, matching this codebase's stdlib-first
+      preference throughout this session.
+
+      27 new tests across `tests/ingestion/test_scheduler.py`,
+      `tests/ingestion/test_snapshot_store.py`, `tests/api/test_app.py`,
+      and `tests/test_config.py`. **Live-verified end-to-end** twice, not
+      just mocked: (1) real FastAPI app, real Ollama, real embedded
+      Qdrant, 1s interval - a new file indexed within the first cycle, an
+      edit reflected in the next, a deletion removed in the cycle after;
+      (2) the restart/deletion-detection scenario described above. Full
+      suite: 378 passed, 0 failures.
 
 ## Phase 8 — Evaluation, Observability & Production Readiness
 

@@ -502,6 +502,17 @@ Shipped so far (`src/agentic_rag/api/`):
   over every question including errored ones) and
   [`eval/README.md`](eval/README.md) — the corpus, question set, a
   plain-language definition of every metric, and how to read a report.
+- **Structured request logging (Phase 8)** — one JSON line to stdout per
+  `POST /query` request, scoped with the user first (no existing spec,
+  per this repo's "never invent architecture" rule): `event`,
+  `timestamp`, `user_tier`, `query`, `rewritten_query`, `history_turns`,
+  `verdict` (a fixed vocabulary — answered, refused for injection/foul
+  language, correctly declined, or refused by output security),
+  `retrieval_hit_count`/`cited_paths`, and per-phase
+  `timings_seconds`. New `src/agentic_rag/observability/` subpackage.
+  Live-verified end-to-end against a real running app: one real request
+  produced exactly one accurate log line. 12 new tests, full suite 437
+  passed.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

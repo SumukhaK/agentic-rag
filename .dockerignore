@@ -1,0 +1,33 @@
+# Mirrors .gitignore's intent for the build context - none of this
+# should ever end up baked into an image.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets - never bake a real .env into an image; runtime config is
+# passed via `docker run -e`/`--env-file` instead.
+.env
+.env.local
+
+# Local runtime data and eval fixtures/output - not part of the
+# application image, and eval/results/ especially can be large.
+data/
+eval/qdrant/
+eval/results/
+
+.git/
+.github/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Not needed inside the image; only for local development.
+tests/
+docs/
+PROJECT_TRACKER.md

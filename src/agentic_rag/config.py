@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     chunk_size_chars: int = 2000
     access_tiers: list[str] = ["tier-1", "tier-2", "tier-3"]
     ollama_base_url: str = "http://localhost:11434"
+    # Deliberately short and separate from embedding_timeout_seconds/
+    # generation_timeout_seconds - a readiness probe exists to answer
+    # "can this reach Ollama right now," not to wait as long as a real
+    # embedding/generation call would; a slow readiness check defeats
+    # its own purpose (a container orchestrator polling it frequently).
+    readiness_check_timeout_seconds: int = 3
     embedding_model: str = "nomic-embed-text"
     embedding_timeout_seconds: int = 30
     embedding_dimensions: int = 768

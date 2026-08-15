@@ -61,6 +61,67 @@ query is complex, the orchestrator may decompose it into sub-questions and
 retry retrieval up to 5 times before falling back to the "I do not know"
 response (§10).
 
+## Deployment
+
+**`Dockerfile` has never actually been built or run.** Docker isn't
+installed in this project's development environment (`docker --version`
+→ "command not found"), so this was written carefully against
+documented `uv`/Python/Docker conventions but couldn't be verified with
+a real `docker build`/`docker run`. Treat it as a first draft to
+validate the first time it's actually built, not a proven artifact.
+
+**Scope, chosen deliberately:** containerizes the FastAPI app only.
+Qdrant stays embedded/on-disk inside the container (matching
+`docs/REQUIREMENTS.md`'s existing "local/embedded mode for now"
+decision — not something this pass changes), and Ollama is expected to
+keep running on the host, the same way local (non-Docker) development
+already reaches it. A full multi-service stack (containerized Qdrant
+server + containerized Ollama) is a bigger architectural change than
+"hardening" — see the [Scaling to 150,000
+Documents](#scaling-to-150000-documents-theoretical) section above for
+why moving off embedded Qdrant specifically would need its own ADR
+first, not just a Dockerfile.
+
+### Building and running
+
+```bash
+docker build -t agentic-rag .
+
+# Linux: reach host Ollama via --network=host, or add the gateway host
+# explicitly. Mac/Windows (Docker Desktop): host.docker.internal
+# resolves to the host automatically.
+docker run -p 8000:8000 \
+  -e WATCHED_FOLDER_PATH=/data/corpus \
+  -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+  -v /path/to/your/corpus:/data/corpus:ro \
+  -v agentic-rag-data:/app/data \
+  agentic-rag
+```
+
+`WATCHED_FOLDER_PATH` has no default (`src/agentic_rag/config.py`) and
+must be bind-mounted from the host — the corpus lives outside the
+container. `/app/data` (Qdrant's embedded storage and the sync
+snapshot) should be a named volume so both persist across container
+restarts; without it, a restart re-indexes the whole corpus from
+scratch (a wasteful but not incorrect outcome — see
+`ingestion/scheduler.py`'s own docstring on why snapshot persistence
+matters).
+
+### Health checks
+
+- `GET /health` — liveness: "is the process up." Never depends on
+  Qdrant/Ollama; a non-200 here means the process itself is the
+  problem.
+- `GET /health/ready` — readiness: "can this actually serve a request
+  right now." Checks Qdrant and Ollama reachability, returns 503 (not
+  200) if either is unreachable, and the response body names which one.
+  The Docker image's own `HEALTHCHECK` deliberately points at `/health`
+  (liveness), not `/health/ready` — see the Dockerfile's own comment for
+  why routing a container-restart signal at a dependency-reachability
+  check would be the wrong altitude for plain `docker run` (a real
+  orchestrator with separate liveness/readiness probes should route
+  them to the two endpoints respectively).
+
 ## Scaling to 150,000 Documents (Theoretical)
 
 `docs/REQUIREMENTS.md` §2 sets the system's actual target at **10,000
@@ -723,6 +784,20 @@ Shipped so far (`src/agentic_rag/api/`):
   of it. 21 new tests, full suite 458 passed. Live-verified end-to-end
   against real running instances of both: a real sync cycle and a real
   eval run each produced exactly one accurate structured log line.
+- **Deployment hardening (Phase 8)** — scoped to containerizing the
+  FastAPI app only (Qdrant stays embedded, Ollama stays on the host).
+  Found two real gaps before any Docker-specific work: `GET /health`
+  was liveness-only with no readiness signal, and there was no ASGI
+  entry point anywhere in the codebase for `uvicorn`/Docker to actually
+  run. Added `GET /health/ready` (checks Qdrant + Ollama, 503 naming
+  which one failed) and `src/agentic_rag/api/main.py`. New
+  `Dockerfile`/`.dockerignore` — **written carefully but never actually
+  built or run**, since Docker isn't installed in this dev environment;
+  see the [Deployment](#deployment) section above for the full caveat.
+  9 new tests, full suite 473 passed. Live-verified everything Docker's
+  absence didn't block: `/health/ready` against real Qdrant + real
+  Ollama, and again with Ollama unreachable; the new entry point via a
+  real `uvicorn` process serving real requests.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

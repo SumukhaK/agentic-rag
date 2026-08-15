@@ -8,12 +8,13 @@ from agentic_rag.config import Settings
 from agentic_rag.embedding.sparse_client import SparseEmbeddingError, embed_sparse_texts
 from agentic_rag.evaluation.judge import FaithfulnessCheckResult
 from agentic_rag.evaluation.questions import EvalQuestion
-from agentic_rag.evaluation.report import EvalQuestionResult
+from agentic_rag.evaluation.report import EvalQuestionResult, EvaluationReport
 from agentic_rag.evaluation.runner import (
     EvaluationIndexingError,
     _fetch_cited_source_text,
     _report_path_for,
     _run_question,
+    main,
     run_evaluation,
 )
 from agentic_rag.indexing.qdrant_setup import (
@@ -524,3 +525,56 @@ def test_report_path_for_is_deterministic_given_a_fixed_time(tmp_path):
     path = _report_path_for(tmp_path, now=now)
 
     assert path == tmp_path / "eval-20260815T103045.json"
+
+
+# --- main -----------------------------------------------------------------------
+
+
+def _dummy_report() -> EvaluationReport:
+    return EvaluationReport(
+        results=[],
+        retrieval_precision=1.0,
+        faithfulness_rate=0.75,
+        hallucination_rate=0.167,
+        errored_count=0,
+        average_duration_seconds=76.7,
+    )
+
+
+@patch("agentic_rag.evaluation.runner.log_evaluation_run")
+@patch("agentic_rag.evaluation.runner.configure_eval_logging")
+@patch("agentic_rag.evaluation.runner.run_evaluation")
+@patch("agentic_rag.evaluation.runner.Settings")
+def test_main_configures_logging_before_running_the_evaluation(
+    mock_settings_cls, mock_run_evaluation, mock_configure, mock_log_run, tmp_path
+):
+    mock_settings_cls.return_value = _settings(tmp_path)
+    mock_run_evaluation.return_value = _dummy_report()
+
+    main()
+
+    mock_configure.assert_called_once()
+
+
+@patch("agentic_rag.evaluation.runner.time.monotonic", side_effect=[100.0, 145.5])
+@patch("agentic_rag.evaluation.runner.log_evaluation_run")
+@patch("agentic_rag.evaluation.runner.configure_eval_logging")
+@patch("agentic_rag.evaluation.runner.run_evaluation")
+@patch("agentic_rag.evaluation.runner.Settings")
+def test_main_logs_the_run_with_the_reports_metrics_and_report_path(
+    mock_settings_cls, mock_run_evaluation, mock_configure, mock_log_run, mock_monotonic, tmp_path
+):
+    mock_settings_cls.return_value = _settings(tmp_path)
+    mock_run_evaluation.return_value = _dummy_report()
+
+    main()
+
+    mock_log_run.assert_called_once()
+    kwargs = mock_log_run.call_args.kwargs
+    assert kwargs["retrieval_precision"] == 1.0
+    assert kwargs["faithfulness_rate"] == 0.75
+    assert kwargs["hallucination_rate"] == 0.167
+    assert kwargs["errored_count"] == 0
+    assert kwargs["average_duration_seconds"] == 76.7
+    assert kwargs["report_path"].endswith(".json")
+    assert kwargs["run_duration_seconds"] == 45.5

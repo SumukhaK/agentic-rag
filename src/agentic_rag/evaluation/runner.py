@@ -20,6 +20,7 @@ from agentic_rag.evaluation.report import (
 from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
 from agentic_rag.indexing.upsert import _point_id
 from agentic_rag.ingestion.scheduler import run_sync_cycle
+from agentic_rag.observability.eval_log import configure_eval_logging, log_evaluation_run
 from agentic_rag.orchestration.answer import Citation
 from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE
 from agentic_rag.orchestration.semantic_cache import SemanticCache, answer_with_cache
@@ -346,15 +347,33 @@ def main() -> None:
     so an eval run always measures the actually-configured system, not a
     separately-configured shadow one. Writes the full report as JSON to a
     timestamped file under `Settings.evaluation_results_path` (so repeat
-    runs accumulate a history rather than overwriting each other) and
-    prints the summary metrics.
+    runs accumulate a history rather than overwriting each other), prints
+    the summary metrics for interactive use, and - via
+    `configure_eval_logging()`/`log_evaluation_run()`
+    (`observability/eval_log.py`) - emits one structured JSON log line
+    with the same summary, so an eval run's outcome lands in the same
+    JSON-lines stream every other component (`POST /query`, the
+    background sync job) logs through, not just this script's own stdout.
     """
+    configure_eval_logging()
+    run_start = time.monotonic()
+
     settings = Settings()
     report = run_evaluation(settings=settings)
 
     settings.evaluation_results_path.mkdir(parents=True, exist_ok=True)
     report_path = _report_path_for(settings.evaluation_results_path)
     report_path.write_text(json.dumps(report_to_json_dict(report), indent=2))
+
+    log_evaluation_run(
+        retrieval_precision=report.retrieval_precision,
+        faithfulness_rate=report.faithfulness_rate,
+        hallucination_rate=report.hallucination_rate,
+        errored_count=report.errored_count,
+        average_duration_seconds=report.average_duration_seconds,
+        report_path=str(report_path),
+        run_duration_seconds=time.monotonic() - run_start,
+    )
 
     print(f"retrieval_precision: {report.retrieval_precision}")
     print(f"faithfulness_rate:   {report.faithfulness_rate}")

@@ -513,6 +513,15 @@ Shipped so far (`src/agentic_rag/api/`):
   Live-verified end-to-end against a real running app: one real request
   produced exactly one accurate log line. 12 new tests, full suite 437
   passed.
+- **Sync job + eval runner logging (Phase 8)** — extended structured
+  logging to the two pieces the first slice explicitly left unobserved:
+  the background sync job and the evaluation runner. Extracted a shared
+  `observability/logging_setup.py` primitive rather than duplicating the
+  request logger's idempotent-handler logic a second and third time;
+  `sync_log.py`/`eval_log.py` each define their own event shape on top
+  of it. 21 new tests, full suite 458 passed. Live-verified end-to-end
+  against real running instances of both: a real sync cycle and a real
+  eval run each produced exactly one accurate structured log line.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

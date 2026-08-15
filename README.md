@@ -497,6 +497,11 @@ Shipped so far (`src/agentic_rag/api/`):
   total, full suite 420 passed. Re-verified live end-to-end after every
   fix: same metrics, `retrieval_precision: 1.0`, `faithfulness_rate:
   0.75`, `hallucination_rate: 0.167`, now with `errored_count: 0` visible.
+  **Follow-up**: added per-question `duration_seconds`/aggregate
+  `average_duration_seconds` (measured with `time.monotonic()`, averaged
+  over every question including errored ones) and
+  [`eval/README.md`](eval/README.md) — the corpus, question set, a
+  plain-language definition of every metric, and how to read a report.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

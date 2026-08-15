@@ -131,11 +131,16 @@ def _run_question(
     per-item isolation `run_sync_cycle()` already applies one layer down
     for indexing.
 
-    `duration_seconds` is measured from entry to either return path (via
-    `time.monotonic()`, immune to wall-clock adjustments) - it covers the
-    whole round trip (retrieval, generation, and the faithfulness judge
-    call when it runs), including a question that ultimately errored, so
-    "how long before it failed" is captured too.
+    `duration_seconds` is measured from entry to the single return point
+    below (via `time.monotonic()`, immune to wall-clock adjustments) - it
+    covers the whole round trip (retrieval, generation, and the
+    faithfulness judge call when it runs), including a question that
+    ultimately errored, so "how long before it failed" is captured too.
+    The success and failure paths below only build the fields that differ
+    between them (`outcome`); the fields every question shares
+    (`question_id`, `duration_seconds`, ...) are supplied once, at the
+    single `EvalQuestionResult(...)` call site, so a future field doesn't
+    have to be added to two near-identical constructor calls in lockstep.
     """
     start = time.monotonic()
     try:
@@ -204,11 +209,7 @@ def _run_question(
                 answered and faithfulness is not None and not faithfulness.is_faithful
             )
 
-        return EvalQuestionResult(
-            question_id=question.id,
-            query=question.query,
-            expected_answerable=question.expected_answerable,
-            expected_source_paths=question.expected_source_paths,
+        outcome = dict(
             answer_text=answer.text,
             cited_paths=cited_paths,
             retrieval_hit=retrieval_hit,
@@ -216,14 +217,9 @@ def _run_question(
             faithfulness=faithfulness,
             hallucinated=hallucinated,
             error=None,
-            duration_seconds=time.monotonic() - start,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one bad question, see docstring
-        return EvalQuestionResult(
-            question_id=question.id,
-            query=question.query,
-            expected_answerable=question.expected_answerable,
-            expected_source_paths=question.expected_source_paths,
+        outcome = dict(
             answer_text="",
             cited_paths=[],
             retrieval_hit=None,
@@ -231,8 +227,16 @@ def _run_question(
             faithfulness=None,
             hallucinated=False,
             error=f"{type(exc).__name__}: {exc}",
-            duration_seconds=time.monotonic() - start,
         )
+
+    return EvalQuestionResult(
+        question_id=question.id,
+        query=question.query,
+        expected_answerable=question.expected_answerable,
+        expected_source_paths=question.expected_source_paths,
+        duration_seconds=time.monotonic() - start,
+        **outcome,
+    )
 
 
 def run_evaluation(*, settings: Settings) -> EvaluationReport:

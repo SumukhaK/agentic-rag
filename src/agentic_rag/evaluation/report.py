@@ -25,15 +25,18 @@ class EvalQuestionResult:
     raised - a judge-model timeout/OOM, an Ollama connection failure) -
     every other field is a placeholder in that case (`""`/`[]`/`False`/
     `None`), not a real measurement, and `build_report()` excludes an
-    errored question from every metric's denominator rather than letting
-    a placeholder `False` silently count as a confirmed "not hallucinated"
-    or similar.
+    errored question from every *correctness* metric's denominator rather
+    than letting a placeholder `False` silently count as a confirmed "not
+    hallucinated" or similar.
 
     `duration_seconds` covers the whole per-question round trip -
     retrieval, generation, and (when it runs) the faithfulness judge call
     - measured regardless of whether the question errored, since "how
     long before it failed" is still a meaningful number, unlike the
     correctness metrics an error genuinely has nothing to say about.
+    `build_report()` deliberately includes an errored question's
+    `duration_seconds` in `average_duration_seconds` - the one field this
+    exclusion does *not* apply to.
     """
 
     question_id: str
@@ -61,7 +64,7 @@ class EvaluationReport:
     faithfulness_rate: float | None
     hallucination_rate: float | None
     errored_count: int
-    average_duration_seconds: float
+    average_duration_seconds: float | None
 
 
 def build_report(results: list[EvalQuestionResult]) -> EvaluationReport:
@@ -88,7 +91,10 @@ def build_report(results: list[EvalQuestionResult]) -> EvaluationReport:
     including errored ones - unlike the correctness metrics, timing is a
     real measurement even for a question that ultimately failed (a slow
     failure is still a data point about system health), so there's no
-    equivalent reason to exclude it.
+    equivalent reason to exclude it. It's `None` (not `0.0`) when
+    `results` is empty, for the same reason `retrieval_precision` and the
+    others are `None` rather than `0.0` in that case - "no questions ran"
+    and "every question took 0 seconds" must stay distinguishable.
     """
     scored = [r for r in results if r.error is None]
     errored_count = len(results) - len(scored)
@@ -112,7 +118,7 @@ def build_report(results: list[EvalQuestionResult]) -> EvaluationReport:
         errored_count=errored_count,
         average_duration_seconds=(sum(r.duration_seconds for r in results) / len(results))
         if results
-        else 0.0,
+        else None,
     )
 
 

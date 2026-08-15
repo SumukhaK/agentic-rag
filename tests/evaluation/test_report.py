@@ -172,10 +172,13 @@ def test_build_report_average_duration_includes_errored_questions():
     assert report.average_duration_seconds == 4.0
 
 
-def test_build_report_average_duration_is_zero_for_no_questions():
+def test_build_report_average_duration_is_none_for_no_questions():
+    # Matches the other three metrics' None-not-0.0 convention: "no
+    # questions ran" and "every question took 0 seconds" must stay
+    # distinguishable in the report.
     report = build_report([])
 
-    assert report.average_duration_seconds == 0.0
+    assert report.average_duration_seconds is None
 
 
 def test_report_to_json_dict_is_json_serializable():

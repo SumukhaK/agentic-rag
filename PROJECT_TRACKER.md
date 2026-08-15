@@ -1697,7 +1697,44 @@ building unwired infrastructure to fill the slot.
       produces exactly one valid JSON line with an embedded traceback
       for a real exception. Full suite after fixes: 463 passed, 0
       failures.
-- [ ] Load test at target scale (10,000 docs × ~50 pages)
+- [ ] Load test at target scale (10,000 docs × ~50 pages) — still not
+      started. A separate, explicitly theoretical exercise was done
+      instead, at the user's request, own PR
+      `docs/scaling-to-150k-analysis`: [README.md's "Scaling to 150,000
+      Documents"](../README.md) works out what would break and what
+      would need to change to run this architecture at 15× the real
+      target (150,000 docs, still ~50 pages average), grounded in a real
+      10-document calibration run against the actual production pipeline
+      (not guessed numbers) extrapolated linearly. Headline finding:
+      ≈18.4 days for a from-scratch initial load at current
+      single-threaded throughput (a lower bound - HNSW insert-cost
+      growth and sustained-load effects over that long a run would push
+      it higher, not lower), ≈147GB Qdrant storage, ≈47–55GB in-RAM HNSW
+      index, and an order-of-magnitude ≈390–410GB estimate for what an
+      unbounded `EmbeddingCache` would need if a 150k-doc load were ever
+      attempted as one sync cycle. Self-review (4 targeted verification
+      passes - arithmetic, fact-checking claims against the real
+      codebase, methodology/internal-consistency, and CLAUDE.md
+      conventions/altitude, since the standard 8-angle code-review skill
+      doesn't map cleanly onto a prose-and-math deliverable) found a
+      real problem: two "CLAUDE.md rules" cited to justify the proposed
+      architectural changes ("No Celery in early stages," an ADR-trigger
+      rule for new ML models/dependencies) don't exist anywhere in this
+      repo's actual `.claude/CLAUDE.md` — both were lifted from an
+      unrelated project's CLAUDE.md that has been contaminating this
+      session's context (the same class of mistake already caught once
+      this session in `eval/README.md`'s misattributed project identity).
+      Fixed by removing the fabricated quotes and citing this repo's
+      real §1 instead. Also fixed: a cache-value-type overstatement
+      (sparse cache entries are `SparseVector`, not `list[float]`), two
+      docstring quotes that weren't quite verbatim, a missing HNSW/
+      sustained-load caveat on the linear extrapolation, a missing
+      sample-size caveat on the 10-document measurement, prescriptive
+      "decided plan" language that contradicted the section's own
+      "theoretical, not proposed as work now" framing, and a slightly
+      understated `EmbeddingCache` range from mixed KB/GB unit
+      conventions. The real 10,000-document Phase 8 load test above
+      remains not started.
 - [ ] Deployment hardening (containerization, health checks)
 
 ---

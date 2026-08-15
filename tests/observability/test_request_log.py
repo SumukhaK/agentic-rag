@@ -5,6 +5,7 @@ import logging
 from agentic_rag.observability.request_log import (
     VERDICT_ANSWERED,
     VERDICT_CANNOT_ANSWER,
+    VERDICT_ERROR,
     VERDICT_REFUSED_FOUL_LANGUAGE,
     VERDICT_REFUSED_INJECTION,
     VERDICT_REFUSED_OUTPUT_SECURITY,
@@ -79,16 +80,62 @@ def test_log_query_request_allows_a_none_rewritten_query_for_early_refusals(capl
     assert payload["verdict"] == "refused_injection"
 
 
-def test_verdict_constants_are_five_distinct_strings():
+def test_verdict_constants_are_six_distinct_strings():
     verdicts = {
         VERDICT_ANSWERED,
         VERDICT_REFUSED_INJECTION,
         VERDICT_REFUSED_FOUL_LANGUAGE,
         VERDICT_CANNOT_ANSWER,
         VERDICT_REFUSED_OUTPUT_SECURITY,
+        VERDICT_ERROR,
     }
-    assert len(verdicts) == 5
+    assert len(verdicts) == 6
     assert all(isinstance(v, str) for v in verdicts)
+
+
+def test_log_query_request_truncates_an_oversized_query():
+    # QueryRequest.query has no max_length and no request-body-size limit
+    # exists anywhere in the app - without a cap here, a multi-MB query
+    # would produce a proportionally huge log line on every request.
+    stream = io.StringIO()
+    configure_request_logging(stream=stream)
+    oversized = "x" * 5000
+
+    log_query_request(
+        user_tier="tier-1",
+        query=oversized,
+        rewritten_query=oversized,
+        history_turns=0,
+        verdict=VERDICT_ANSWERED,
+        retrieval_hit_count=0,
+        cited_paths=[],
+        timings_seconds={"total": 0.1},
+    )
+
+    payload = json.loads(stream.getvalue().strip())
+    assert len(payload["query"]) < len(oversized)
+    assert "truncated" in payload["query"]
+    assert len(payload["rewritten_query"]) < len(oversized)
+
+
+def test_log_query_request_does_not_truncate_a_short_query():
+    stream = io.StringIO()
+    configure_request_logging(stream=stream)
+
+    log_query_request(
+        user_tier="tier-1",
+        query="who won?",
+        rewritten_query=None,
+        history_turns=0,
+        verdict=VERDICT_REFUSED_INJECTION,
+        retrieval_hit_count=0,
+        cited_paths=[],
+        timings_seconds={"total": 0.1},
+    )
+
+    payload = json.loads(stream.getvalue().strip())
+    assert payload["query"] == "who won?"
+    assert payload["rewritten_query"] is None
 
 
 def test_configure_request_logging_writes_json_lines_to_the_given_stream():
@@ -107,6 +154,34 @@ def test_configure_request_logging_writes_json_lines_to_the_given_stream():
     )
 
     payload = json.loads(stream.getvalue().strip())
+    assert payload["query"] == "q"
+
+
+def test_configure_request_logging_resolves_stdout_at_call_time(monkeypatch):
+    # `stream` defaulting to a bare `sys.stdout` parameter would bind to
+    # whatever object sys.stdout was at *import* time - if something
+    # (a test framework's output capture, a console reconfiguration)
+    # reassigns sys.stdout afterwards, that stale binding would silently
+    # keep writing to the old object forever. Looking it up inside the
+    # function body means a later sys.stdout swap is picked up correctly.
+    import sys
+
+    replacement_stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", replacement_stdout)
+
+    configure_request_logging()
+    log_query_request(
+        user_tier="tier-1",
+        query="q",
+        rewritten_query="q",
+        history_turns=0,
+        verdict=VERDICT_ANSWERED,
+        retrieval_hit_count=0,
+        cited_paths=[],
+        timings_seconds={"total": 0.1},
+    )
+
+    payload = json.loads(replacement_stdout.getvalue().strip())
     assert payload["query"] == "q"
 
 

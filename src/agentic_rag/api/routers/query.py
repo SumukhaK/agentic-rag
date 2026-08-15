@@ -17,6 +17,7 @@ from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.observability.request_log import (
     VERDICT_ANSWERED,
     VERDICT_CANNOT_ANSWER,
+    VERDICT_ERROR,
     VERDICT_REFUSED_FOUL_LANGUAGE,
     VERDICT_REFUSED_INJECTION,
     VERDICT_REFUSED_OUTPUT_SECURITY,
@@ -152,48 +153,59 @@ def query(
     on it would be a pure wasted LLM round-trip.
 
     One structured JSON log line (`observability/request_log.py`) is
-    emitted on every path that returns a `QueryResponse`, timed per phase
-    via `time.monotonic()` - the 422 (`UnknownAccessTierError`) path is
-    the one exception, since it's a client input-validation failure
-    before any pipeline outcome exists to log, not one of the fixed
-    `VERDICT_*` vocabulary's cases.
+    emitted for every request, timed per phase via `time.monotonic()` -
+    including a request that raises: the whole body below runs inside one
+    `try`, and an exception other than `UnknownAccessTierError` (a
+    `GenerationError` from an unreachable/timed-out Ollama call, most
+    plausibly) is logged with `VERDICT_ERROR` and whatever partial
+    timings/outcome fields were already computed, then re-raised - the
+    exact scenario this log exists to help diagnose (an Ollama outage)
+    must not be the one scenario it stays silent for. `UnknownAccessTierError`
+    is the one case that isn't logged at all: a client input-validation
+    failure (422) before any pipeline outcome exists to log, not one of
+    the fixed `VERDICT_*` vocabulary's cases.
     """
     request_start = time.monotonic()
     history_turns = len(payload.history)
+    timings: dict[str, float] = {}
+    rewritten_query: str | None = None
+    retrieval_hit_count = 0
+    cited_paths: list[str] = []
 
-    screen_start = time.monotonic()
-    screened = _screen_input(payload.query, settings=settings)
-    screen_seconds = time.monotonic() - screen_start
-    if screened is not None:
-        refusal, verdict = screened
+    def _log(verdict: str) -> None:
+        timings["total"] = time.monotonic() - request_start
         log_query_request(
             user_tier=payload.user_tier,
             query=payload.query,
-            rewritten_query=None,
+            rewritten_query=rewritten_query,
             history_turns=history_turns,
             verdict=verdict,
-            retrieval_hit_count=0,
-            cited_paths=[],
-            timings_seconds={
-                "screen_input": screen_seconds,
-                "total": time.monotonic() - request_start,
-            },
+            retrieval_hit_count=retrieval_hit_count,
+            cited_paths=cited_paths,
+            timings_seconds=timings,
         )
-        return QueryResponse(answer=refusal, citations=[])
-
-    history = [ConversationTurn(t.user_query, t.assistant_answer) for t in payload.history]
-    rewrite_start = time.monotonic()
-    rewritten_query = rewrite_query(
-        history,
-        payload.query,
-        model=settings.generation_model,
-        base_url=settings.ollama_base_url,
-        timeout=settings.generation_timeout_seconds,
-        temperature=settings.rewrite_temperature,
-    )
-    rewrite_seconds = time.monotonic() - rewrite_start
 
     try:
+        screen_start = time.monotonic()
+        screened = _screen_input(payload.query, settings=settings)
+        timings["screen_input"] = time.monotonic() - screen_start
+        if screened is not None:
+            refusal, verdict = screened
+            _log(verdict)
+            return QueryResponse(answer=refusal, citations=[])
+
+        history = [ConversationTurn(t.user_query, t.assistant_answer) for t in payload.history]
+        rewrite_start = time.monotonic()
+        rewritten_query = rewrite_query(
+            history,
+            payload.query,
+            model=settings.generation_model,
+            base_url=settings.ollama_base_url,
+            timeout=settings.generation_timeout_seconds,
+            temperature=settings.rewrite_temperature,
+        )
+        timings["rewrite"] = time.monotonic() - rewrite_start
+
         answer_start = time.monotonic()
         answer = answer_with_cache(
             rewritten_query,
@@ -219,27 +231,19 @@ def query(
             similarity_threshold=settings.semantic_cache_similarity_threshold,
             ttl_seconds=settings.semantic_cache_ttl_seconds,
         )
-        answer_seconds = time.monotonic() - answer_start
+        timings["answer"] = time.monotonic() - answer_start
 
         retrieval_hit_count = len(answer.citations)
         cited_paths = [citation.relative_path for citation in answer.citations]
 
         if answer.text == CANNOT_ANSWER_MESSAGE:
-            log_query_request(
-                user_tier=payload.user_tier,
-                query=payload.query,
-                rewritten_query=rewritten_query,
-                history_turns=history_turns,
-                verdict=VERDICT_CANNOT_ANSWER,
-                retrieval_hit_count=0,
-                cited_paths=[],
-                timings_seconds={
-                    "screen_input": screen_seconds,
-                    "rewrite": rewrite_seconds,
-                    "answer": answer_seconds,
-                    "total": time.monotonic() - request_start,
-                },
-            )
+            # The canonical fallback never carries citations
+            # (generate_answer()'s contract) - reset to 0/[] rather than
+            # trust that invariant silently, so this log field can never
+            # drift from what the caller actually received here.
+            retrieval_hit_count = 0
+            cited_paths = []
+            _log(VERDICT_CANNOT_ANSWER)
             return QueryResponse(answer=CANNOT_ANSWER_MESSAGE, citations=[])
 
         security_start = time.monotonic()
@@ -254,17 +258,12 @@ def query(
             timeout=settings.generation_timeout_seconds,
             temperature=settings.judge_temperature,
         )
-        security_seconds = time.monotonic() - security_start
+        timings["output_security"] = time.monotonic() - security_start
     except UnknownAccessTierError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    timings_seconds = {
-        "screen_input": screen_seconds,
-        "rewrite": rewrite_seconds,
-        "answer": answer_seconds,
-        "output_security": security_seconds,
-        "total": time.monotonic() - request_start,
-    }
+    except Exception:
+        _log(VERDICT_ERROR)
+        raise
 
     if not security_result.is_safe:
         # retrieval_hit_count/cited_paths reflect what was actually
@@ -272,28 +271,10 @@ def query(
         # caller receives - a reader debugging *why* output security
         # flagged this answer needs to see what it flagged, not what got
         # returned instead.
-        log_query_request(
-            user_tier=payload.user_tier,
-            query=payload.query,
-            rewritten_query=rewritten_query,
-            history_turns=history_turns,
-            verdict=VERDICT_REFUSED_OUTPUT_SECURITY,
-            retrieval_hit_count=retrieval_hit_count,
-            cited_paths=cited_paths,
-            timings_seconds=timings_seconds,
-        )
+        _log(VERDICT_REFUSED_OUTPUT_SECURITY)
         return QueryResponse(answer=CANNOT_ANSWER_MESSAGE, citations=[])
 
-    log_query_request(
-        user_tier=payload.user_tier,
-        query=payload.query,
-        rewritten_query=rewritten_query,
-        history_turns=history_turns,
-        verdict=VERDICT_ANSWERED,
-        retrieval_hit_count=retrieval_hit_count,
-        cited_paths=cited_paths,
-        timings_seconds=timings_seconds,
-    )
+    _log(VERDICT_ANSWERED)
 
     return QueryResponse(
         answer=answer.text,

@@ -1555,14 +1555,20 @@ building unwired infrastructure to fill the slot.
       plain-language definitions of every metric, the latest live run's
       full per-question breakdown (answers, verdicts, durations), and an
       overall health assessment. Full suite: 425 passed, 0 failures.
-- [x] Logging/tracing across the pipeline — own PR, `feat/query-request-
-      logging`. Scoped with the user via `AskUserQuestion` before writing
-      any code (no existing spec in `docs/REQUIREMENTS.md`, per this
-      repo's own "never invent architecture" rule): structured request
-      logging for `POST /query` end-to-end, as JSON lines to stdout - not
-      full span-based tracing, and not the background sync job (a
-      separate, already-isolated concern with its own failure/retry
-      logging built in Phase 7).
+- [x] Logging/tracing across the pipeline — **scoped to `POST /query`
+      request logging for this slice**, own PR, `feat/query-request-
+      logging`. The background sync job (`ingestion/scheduler.py`) and
+      the evaluation runner (`evaluation/runner.py`) remain unobserved -
+      `scheduler.py` already calls `logger.info()`/`logger.exception()`
+      but nothing has ever configured a handler for it (so those calls
+      currently emit nothing), and the eval runner uses bare `print()`.
+      Wiring those into the same `observability/` module is natural
+      follow-up work, not done here - flagged explicitly rather than
+      letting this checkbox imply more than it covers. Scoped with the
+      user via `AskUserQuestion` before writing any code (no existing
+      spec in `docs/REQUIREMENTS.md`, per this repo's own "never invent
+      architecture" rule): structured request logging for `POST /query`
+      end-to-end, as JSON lines to stdout - not full span-based tracing.
 
       New `src/agentic_rag/observability/` subpackage,
       `request_log.py`: `configure_request_logging()` attaches a

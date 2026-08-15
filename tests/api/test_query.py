@@ -1,3 +1,4 @@
+import itertools
 import json
 import logging
 from pathlib import Path
@@ -11,6 +12,7 @@ from agentic_rag.config import Settings
 from agentic_rag.observability.request_log import (
     VERDICT_ANSWERED,
     VERDICT_CANNOT_ANSWER,
+    VERDICT_ERROR,
     VERDICT_REFUSED_FOUL_LANGUAGE,
     VERDICT_REFUSED_INJECTION,
     VERDICT_REFUSED_OUTPUT_SECURITY,
@@ -348,16 +350,6 @@ class _ListHandler(logging.Handler):
         self.records.append(record)
 
 
-def _capture_query_log() -> _ListHandler:
-    handler = _ListHandler()
-    logging.getLogger("agentic_rag.query").addHandler(handler)
-    return handler
-
-
-def _release_query_log(handler: _ListHandler) -> None:
-    logging.getLogger("agentic_rag.query").removeHandler(handler)
-
-
 def _log_payload(handler: _ListHandler) -> dict:
     assert len(handler.records) == 1, f"expected one request-log record, got {len(handler.records)}"
     return json.loads(handler.records[0].getMessage())
@@ -365,17 +357,25 @@ def _log_payload(handler: _ListHandler) -> dict:
 
 @pytest.fixture
 def query_log():
-    handler = _capture_query_log()
+    handler = _ListHandler()
+    logger = logging.getLogger("agentic_rag.query")
+    logger.addHandler(handler)
     yield handler
-    _release_query_log(handler)
+    logger.removeHandler(handler)
 
 
 def test_query_logs_verdict_answered_with_citations_and_timings(tmp_path, mocks, query_log):
+    # time.monotonic() is mocked to a deterministic counting sequence, not
+    # left to real wall-clock time - this repo's own CLAUDE.md forbids
+    # tests relying on real timing, and a counter makes "every phase's
+    # duration is non-negative" an assertion that actually verifies the
+    # timing wiring is correct rather than one that can never fail.
     citation = Citation(number=1, relative_path="tier-1/derby.md", chunk_index=0, access_tier="tier-1")
     mocks["answer"].return_value = AnswerResult(text="Arsenal won [1].", citations=[citation])
 
-    with _client(tmp_path) as client:
-        client.post("/query", json={"query": "who won?", "user_tier": "tier-1", "history": []})
+    with patch("agentic_rag.api.routers.query.time.monotonic", side_effect=itertools.count(0, 1)):
+        with _client(tmp_path) as client:
+            client.post("/query", json={"query": "who won?", "user_tier": "tier-1", "history": []})
 
     payload = _log_payload(query_log)
     assert payload["verdict"] == VERDICT_ANSWERED
@@ -464,3 +464,25 @@ def test_query_does_not_log_on_the_422_unknown_tier_path(tmp_path, mocks, query_
         client.post("/query", json={"query": "who won?", "user_tier": "admin", "history": []})
 
     assert query_log.records == []
+
+
+def test_query_logs_verdict_error_and_reraises_on_an_unhandled_exception(tmp_path, mocks, query_log):
+    # The one scenario this log exists to help diagnose (Ollama down
+    # mid-request) must not be the one scenario it stays silent for -
+    # the whole query() body runs inside one try/except Exception that
+    # logs VERDICT_ERROR with whatever partial outcome was already
+    # computed, then re-raises (TestClient re-raises server exceptions
+    # directly by default, rather than turning them into a 500 response).
+    mocks["rewrite"].return_value = "the rewritten question"
+    mocks["answer"].side_effect = RuntimeError("Ollama unreachable")
+
+    with _client(tmp_path) as client:
+        with pytest.raises(RuntimeError, match="Ollama unreachable"):
+            client.post("/query", json={"query": "who won?", "user_tier": "tier-1", "history": []})
+
+    payload = _log_payload(query_log)
+    assert payload["verdict"] == VERDICT_ERROR
+    assert payload["rewritten_query"] == "the rewritten question"
+    assert payload["retrieval_hit_count"] == 0
+    assert payload["cited_paths"] == []
+    assert "total" in payload["timings_seconds"]

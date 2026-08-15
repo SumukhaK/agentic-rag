@@ -17,7 +17,7 @@ status: [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) · Working agreement:
   is ~26GB vs. mistral's ~4.1GB, not warranted for local dev)
 - **Embedding model:** `nomic-embed-text`, served locally via Ollama
 - **Reranker:** local open-source cross-encoder (`bge-reranker-v2-m3`-class)
-- **Evaluation:** Claude (Anthropic API), for offline quality evaluation only (Phase 8) — not the injection judge, output/citation safety check, or foul-language check below, which all use the local `mistral` model (Phase 6 decision, `docs/REQUIREMENTS.md` §13)
+- **Evaluation:** `qwen2.5:14b-instruct`, served locally via Ollama, for offline quality evaluation only (Phase 8) — pivoted away from Claude since no `ANTHROPIC_API_KEY` was configured for this project (Phase 8 decision, `PROJECT_TRACKER.md`'s "Structured evaluation" entry); not the injection judge, output/citation safety check, or foul-language check below, which all use the local `mistral` model (Phase 6 decision, `docs/REQUIREMENTS.md` §13)
 - **Agent orchestration:** custom agent loop, no framework (LangGraph/LlamaIndex not used)
 - **Ingestion:** [`markitdown`](https://github.com/microsoft/markitdown) converts any source file type to Markdown
 

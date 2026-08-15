@@ -1,7 +1,7 @@
 # Evaluation
 
-This directory holds the structured evaluation for the football intelligence
-assistant's retrieval-augmented generation (RAG) pipeline: a small, hand-curated
+This directory holds the structured evaluation for this project's (Agentic
+RAG's) retrieval-augmented generation pipeline: a small, hand-curated
 question set answered through the real `POST /query` code path, scored against
 ground truth. It exists to answer one question with real numbers instead of a
 gut feeling: **is the assistant grounded, or is it making things up?**

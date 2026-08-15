@@ -123,6 +123,32 @@ def test_settings_rejects_a_zero_readiness_check_timeout_seconds(monkeypatch):
         Settings()
 
 
+def test_settings_defaults_loadtest_batch_size(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("LOADTEST_BATCH_SIZE", raising=False)
+
+    settings = Settings()
+
+    assert settings.loadtest_batch_size == 200
+
+
+def test_settings_loadtest_batch_size_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("LOADTEST_BATCH_SIZE", "50")
+
+    settings = Settings()
+
+    assert settings.loadtest_batch_size == 50
+
+
+def test_settings_rejects_a_zero_loadtest_batch_size(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("LOADTEST_BATCH_SIZE", "0")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_settings_defaults_qdrant_settings(monkeypatch):
     monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
     for key in ("EMBEDDING_DIMENSIONS", "QDRANT_STORAGE_PATH", "QDRANT_COLLECTION_NAME"):

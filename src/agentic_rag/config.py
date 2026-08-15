@@ -53,3 +53,15 @@ class Settings(BaseSettings):
     evaluation_qdrant_storage_path: Path = Path("./eval/qdrant")
     evaluation_qdrant_collection_name: str = "eval_documents"
     evaluation_results_path: Path = Path("./eval/results")
+    loadtest_corpus_staging_path: Path = Path("./loadtest/corpus_staging")
+    loadtest_watched_folder_path: Path = Path("./loadtest/watched")
+    loadtest_qdrant_storage_path: Path = Path("./loadtest/qdrant")
+    loadtest_qdrant_collection_name: str = "loadtest_documents"
+    loadtest_sync_snapshot_path: Path = Path("./loadtest/sync_snapshot.json")
+    loadtest_results_path: Path = Path("./loadtest/results")
+    # Bounds how much work a crash can lose to roughly one batch, not the
+    # whole ~30-hour run - run_sync_cycle() only checkpoints (via
+    # save_snapshot()) once per call, and at the ~10.6s/doc rate measured
+    # in README.md's calibration run, 200 docs/batch is ~35 minutes of
+    # exposure, not hours.
+    loadtest_batch_size: int = Field(default=200, gt=0)

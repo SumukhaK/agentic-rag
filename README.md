@@ -806,6 +806,29 @@ Shipped so far (`src/agentic_rag/api/`):
   `/health/ready` against real Qdrant + real Ollama, and again with
   Ollama unreachable; the new `create --factory` entry point via a real
   `uvicorn` process serving real requests.
+- **Load-test corpus generator + runner (Phase 8, code only)** — the real
+  10,000-doc × ~50-page target from `docs/REQUIREMENTS.md` §2, not the
+  150k theoretical extrapolation above. New
+  `src/agentic_rag/loadtest/corpus_generator.py` writes a deterministic,
+  synthetic football-domain-styled corpus; every paragraph embeds a
+  `(doc_index, paragraph_index)` tag that structurally guarantees no two
+  chunk-sized text windows repeat anywhere in the corpus — closing off
+  the exact `EmbeddingCache` false-speedup pitfall the 150k calibration
+  run hit once already, by construction. New
+  `src/agentic_rag/loadtest/runner.py` reuses `run_sync_cycle()` (the
+  real production pipeline, not a parallel one), drip-feeding the corpus
+  into a dedicated watched folder in checkpointed batches so a crash
+  loses at most one batch, not the whole run — resumable with no new
+  state file, since `_next_batch()` just diffs the staging directory
+  against what's already been copied. A second phase measures real query
+  latency against the fully-loaded index, closing a gap the
+  ingestion-only 150k analysis left open. 28 new tests, full suite 510
+  passed. **Live-verified against real Ollama + real Qdrant**: a
+  12-document run completed both phases end-to-end, and a 20-document
+  run was deliberately killed mid-batch and resumed, finishing with zero
+  data loss or duplication. **This PR is code only** — the real
+  ~30-hour, 10,000-document run itself is a separate, not-yet-started
+  step (see [`loadtest/README.md`](loadtest/README.md)).
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

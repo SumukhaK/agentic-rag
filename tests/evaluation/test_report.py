@@ -13,6 +13,7 @@ def _result(
     faithfulness=None,
     hallucinated=False,
     error=None,
+    duration_seconds=1.0,
 ):
     return EvalQuestionResult(
         question_id=question_id,
@@ -26,6 +27,7 @@ def _result(
         faithfulness=faithfulness,
         hallucinated=hallucinated,
         error=error,
+        duration_seconds=duration_seconds,
     )
 
 
@@ -144,6 +146,41 @@ def test_build_report_errored_count_is_zero_when_nothing_errored():
     assert report.errored_count == 0
 
 
+def test_build_report_computes_average_duration_over_every_question():
+    results = [
+        _result(question_id="q1", duration_seconds=2.0),
+        _result(question_id="q2", duration_seconds=4.0),
+    ]
+
+    report = build_report(results)
+
+    assert report.average_duration_seconds == 3.0
+
+
+def test_build_report_average_duration_includes_errored_questions():
+    # Unlike the correctness metrics, timing is a real measurement even
+    # for a question that ultimately failed - a slow failure is still a
+    # data point about system health, so it isn't excluded the way a
+    # placeholder hallucinated=False is.
+    results = [
+        _result(question_id="q1", duration_seconds=2.0),
+        _result(question_id="q2", duration_seconds=6.0, answered=False, error="boom"),
+    ]
+
+    report = build_report(results)
+
+    assert report.average_duration_seconds == 4.0
+
+
+def test_build_report_average_duration_is_none_for_no_questions():
+    # Matches the other three metrics' None-not-0.0 convention: "no
+    # questions ran" and "every question took 0 seconds" must stay
+    # distinguishable in the report.
+    report = build_report([])
+
+    assert report.average_duration_seconds is None
+
+
 def test_report_to_json_dict_is_json_serializable():
     results = [
         _result(
@@ -200,3 +237,13 @@ def test_report_to_json_dict_includes_errored_count():
 
     assert payload["errored_count"] == 1
     assert payload["results"][0]["error"] == "boom"
+
+
+def test_report_to_json_dict_includes_duration():
+    results = [_result(question_id="q1", duration_seconds=3.5)]
+    report = build_report(results)
+
+    payload = report_to_json_dict(report)
+
+    assert payload["average_duration_seconds"] == 3.5
+    assert payload["results"][0]["duration_seconds"] == 3.5

@@ -85,6 +85,7 @@ def _dummy_result(question_id="q1", error=None) -> EvalQuestionResult:
         faithfulness=FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN"),
         hallucinated=False,
         error=error,
+        duration_seconds=1.0,
     )
 
 
@@ -330,7 +331,7 @@ def test_run_question_isolates_a_pipeline_failure_into_the_error_field(tmp_path)
     with patch(
         "agentic_rag.evaluation.runner.answer_with_cache",
         side_effect=RuntimeError("Ollama timed out"),
-    ):
+    ), patch("agentic_rag.evaluation.runner.time.monotonic", side_effect=[10.0, 34.0]):
         settings = _settings(tmp_path)
 
         result = _run_question(
@@ -342,6 +343,35 @@ def test_run_question_isolates_a_pipeline_failure_into_the_error_field(tmp_path)
     assert result.hallucinated is False
     assert result.retrieval_hit is None
     assert result.faithfulness is None
+    assert result.duration_seconds == 24.0
+
+
+@patch("agentic_rag.evaluation.runner.check_faithfulness")
+@patch("agentic_rag.evaluation.runner._fetch_cited_source_text")
+@patch("agentic_rag.evaluation.runner.answer_with_cache")
+def test_run_question_records_the_duration_of_a_successful_run(
+    mock_answer, mock_fetch_text, mock_faithfulness, tmp_path
+):
+    # duration_seconds must come from a real time.monotonic() delta, not a
+    # hardcoded/derivable constant - mocking the clock (rather than relying
+    # on real wall-clock timing, which this repo's CLAUDE.md forbids in
+    # tests) lets this assert an exact value instead of a tautological
+    # ">= 0.0" that could never catch e.g. duration_seconds being wired to
+    # the wrong pair of timestamps.
+    mock_answer.return_value = AnswerResult(
+        text="Arsenal won [1].",
+        citations=[Citation(number=1, relative_path="tier-1/derby.md", chunk_index=0, access_tier="tier-1")],
+    )
+    mock_fetch_text.return_value = "Arsenal beat Chelsea 3-0."
+    mock_faithfulness.return_value = FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN")
+    settings = _settings(tmp_path)
+
+    with patch("agentic_rag.evaluation.runner.time.monotonic", side_effect=[100.0, 105.25]):
+        result = _run_question(
+            _question(), settings=settings, client=object(), embedding_cache=object()
+        )
+
+    assert result.duration_seconds == 5.25
 
 
 # --- run_evaluation ------------------------------------------------------------

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -129,7 +130,19 @@ def _run_question(
     every other, already-computed result in the same run, the same
     per-item isolation `run_sync_cycle()` already applies one layer down
     for indexing.
+
+    `duration_seconds` is measured from entry to the single return point
+    below (via `time.monotonic()`, immune to wall-clock adjustments) - it
+    covers the whole round trip (retrieval, generation, and the
+    faithfulness judge call when it runs), including a question that
+    ultimately errored, so "how long before it failed" is captured too.
+    The success and failure paths below only build the fields that differ
+    between them (`outcome`); the fields every question shares
+    (`question_id`, `duration_seconds`, ...) are supplied once, at the
+    single `EvalQuestionResult(...)` call site, so a future field doesn't
+    have to be added to two near-identical constructor calls in lockstep.
     """
+    start = time.monotonic()
     try:
         cache = SemanticCache()
         answer = answer_with_cache(
@@ -196,11 +209,7 @@ def _run_question(
                 answered and faithfulness is not None and not faithfulness.is_faithful
             )
 
-        return EvalQuestionResult(
-            question_id=question.id,
-            query=question.query,
-            expected_answerable=question.expected_answerable,
-            expected_source_paths=question.expected_source_paths,
+        outcome = dict(
             answer_text=answer.text,
             cited_paths=cited_paths,
             retrieval_hit=retrieval_hit,
@@ -210,11 +219,7 @@ def _run_question(
             error=None,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one bad question, see docstring
-        return EvalQuestionResult(
-            question_id=question.id,
-            query=question.query,
-            expected_answerable=question.expected_answerable,
-            expected_source_paths=question.expected_source_paths,
+        outcome = dict(
             answer_text="",
             cited_paths=[],
             retrieval_hit=None,
@@ -223,6 +228,15 @@ def _run_question(
             hallucinated=False,
             error=f"{type(exc).__name__}: {exc}",
         )
+
+    return EvalQuestionResult(
+        question_id=question.id,
+        query=question.query,
+        expected_answerable=question.expected_answerable,
+        expected_source_paths=question.expected_source_paths,
+        duration_seconds=time.monotonic() - start,
+        **outcome,
+    )
 
 
 def run_evaluation(*, settings: Settings) -> EvaluationReport:
@@ -346,6 +360,7 @@ def main() -> None:
     print(f"faithfulness_rate:   {report.faithfulness_rate}")
     print(f"hallucination_rate:  {report.hallucination_rate}")
     print(f"errored_count:       {report.errored_count}")
+    print(f"avg_duration_seconds:{report.average_duration_seconds}")
     print(f"report written to:   {report_path}")
 
 

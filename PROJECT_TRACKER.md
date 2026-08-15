@@ -1353,8 +1353,196 @@ building unwired infrastructure to fill the slot.
 
 ## Phase 8 — Evaluation, Observability & Production Readiness
 
-- [ ] Structured evaluation: retrieval precision, faithfulness, hallucination
-      rate (Claude as judge)
+- [x] Structured evaluation: retrieval precision, faithfulness, hallucination
+      rate — own PR, `feat/structured-evaluation`. `docs/REQUIREMENTS.md`'s
+      own Open Items explicitly blocked this on two missing things: an
+      `ANTHROPIC_API_KEY` and a written spec for what gets judged and how.
+
+      **Judge model pivoted away from Claude, decided with the user.**
+      No `ANTHROPIC_API_KEY` is configured for this project. The user
+      proposed a local open-weight model instead - "bigger than mistral,
+      not as frontier as Claude." This machine's actual GPU
+      (`nvidia-smi`: GTX 1650 Ti, **4GB VRAM**) turned out to be the real
+      constraint - the same hardware behind this session's repeated
+      Ollama GPU-OOM incidents with even a 7B model, ruling out anything
+      27B+ outright. Landed on **`qwen2.5:14b-instruct`**, pulled (~9GB)
+      and live-verified on this hardware before committing to it: ~39s
+      cold load (partial CPU offload), ~4s warm inference thereafter -
+      acceptable since eval runs are offline/batch, not on `POST /query`'s
+      live path. Pinned to its own `evaluation_temperature=0.0`, not
+      reusing `judge_temperature`, for the same reproducibility reasoning
+      `generation_temperature` was already split out for.
+
+      **Not everything needs a judge call - only what's genuinely a
+      judgment call does.** Proposed to the user and approved before
+      writing any code:
+      - **Retrieval precision** - deterministic. `eval/questions.json`
+        carries hand-curated ground-truth `expected_source_paths` per
+        question; precision = fraction where an expected source is among
+        the actual citations.
+      - **Faithfulness** - the one genuinely subjective dimension, so
+        the only one that goes through the judge. New
+        `evaluation/judge.py::check_faithfulness()` reuses
+        `orchestration/judge.py`'s existing `run_judge()`/
+        `classify_verdict()` (the same CLEAN-vs-flagged pattern the three
+        production judges already use) rather than a fourth bespoke judge
+        implementation. Deliberately skips `has_forged_verdict()` - that's
+        an adversarial-user defense for the live request path; an eval run
+        judges the system's own output against a trusted, hand-written
+        corpus offline, with no untrusted party in the loop.
+      - **Hallucination rate** - mostly deterministic. A dedicated subset
+        of questions is marked `expected_answerable: false`; hallucination
+        = the system fabricating an answer instead of returning the
+        canonical fallback, plus any answerable question judged unfaithful.
+        A question that *should* have been answerable but got the fallback
+        instead is neither - that's a retrieval miss, not hallucination,
+        and the two are never conflated.
+
+      **New pieces**: `eval/corpus/` (4 small, real football documents
+      across tier-1/tier-2), `eval/questions.json` (6 hand-curated
+      questions, 4 answerable + 2 deliberately not), and a new
+      `src/agentic_rag/evaluation/` subpackage - `questions.py` (loader,
+      rejects a duplicate `id` or an `expected_answerable` question with
+      no `expected_source_paths` to check precision against),
+      `judge.py` (`check_faithfulness()`), `report.py` (pure aggregation:
+      `build_report()`, `report_to_json_dict()`), `runner.py`
+      (`run_evaluation()` - indexes `eval/corpus/` into a *separate*
+      Qdrant collection via `run_sync_cycle()` (`ingestion/scheduler.py`
+      - the exact code path the background sync job uses in production,
+      not a fourth reimplementation of indexing), then answers every
+      question through the real `answer_with_cache()`). CLI entry point:
+      `python -m agentic_rag.evaluation.runner`, writing a timestamped
+      JSON report to `eval/results/` (gitignored - run output, not a
+      fixture) and printing the three summary metrics.
+
+      Plain JSON for the question set, not YAML - no new dependency for a
+      flat list of short records with no nested structure, matching this
+      session's stdlib-first bias throughout (`tomllib`,
+      `importlib.metadata`, no `pytest-asyncio`).
+
+      **A real bug found via the live end-to-end run, not the mocked
+      tests** - the mocked unit tests all constructed `AnswerResult` with
+      the exact `CANNOT_ANSWER_MESSAGE` literal, so they never exercised
+      this: `_run_question()`'s `answered` check originally used exact
+      string equality (`answer.text != CANNOT_ANSWER_MESSAGE`) instead of
+      `answer_with_cache()`'s own established convention (substring
+      containment). The real generation model sometimes wraps the
+      fallback in a leading space (`" I do not know..."`), which the
+      exact-equality check failed to recognize as the fallback at all -
+      silently miscounting a correct "I don't know" as hallucination. A
+      first live run measured `hallucination_rate: 0.5`; fixed to use
+      `CANNOT_ANSWER_MESSAGE not in answer.text` (matching the existing
+      convention exactly), with a regression test reproducing the leading-
+      space case, the corrected re-run measured `hallucination_rate:
+      0.167` - one genuine faithfulness flag, not three phantom ones.
+
+      **A live-observed judge-calibration data point, not a code bug,
+      recorded rather than silently smoothed over**: the one faithfulness
+      flag in the corrected run (`q3-debruyne-injury`) reads, on manual
+      inspection, like a fair paraphrase of its cited source ("suffered a
+      hamstring injury on 10 February 2025" vs. the source's "...during
+      training on 10 February 2025") - the judge appears to have flagged
+      the omission of "during training" as unsupported rather than
+      merely-less-detailed. One example isn't enough evidence to redesign
+      the judge prompt (the three production judges only got hardened
+      after live-testing against many repros, not one), but it's worth
+      tracking if this pattern recurs across future eval runs.
+
+      30 new tests across `tests/evaluation/`. Full suite: 408 passed,
+      0 failures. **Live-verified end-to-end** against the real corpus,
+      real Ollama (`mistral` generation, `qwen2.5:14b-instruct` judging),
+      and real embedded Qdrant: `retrieval_precision: 1.0`,
+      `faithfulness_rate: 0.75`, `hallucination_rate: 0.167`.
+
+      **Self-review (8 finder angles, high effort) found a substantial
+      cluster of real correctness bugs, not polish** - the eval feature's
+      whole purpose is producing trustworthy numbers, and several of
+      these directly undermined that:
+
+      1. **The eval Qdrant collection persisted across runs
+      (`eval/qdrant/`, gitignored but not ephemeral) while `previous_
+      snapshot={}` was hardcoded on every call** - the exact "restart
+      loses deletion detection" bug already fixed once in the background
+      sync job (Phase 7), reintroduced independently in a new context.
+      A renamed/removed eval corpus file left its old chunks stranded in
+      the index forever, silently corrupting future runs' metrics with
+      content no longer in the corpus - and a changed `embedding_model`/
+      `embedding_dimensions` between runs would crash the next run with
+      `CollectionSchemaMismatchError` instead of anything actionable.
+      Fixed by deleting and recreating the eval collection fresh at the
+      start of every `run_evaluation()` call - this makes
+      `previous_snapshot={}` correct instead of merely convenient
+      (nothing stale can ever be left to strand), and a schema mismatch
+      becomes structurally impossible.
+      2. **`run_sync_cycle()`'s returned `SyncCycleResult` (ingestion/
+      indexing/deletion failure lists) was discarded entirely** - a
+      corpus document that failed to index (a transient Ollama timeout,
+      plausible given this machine's own documented GPU-OOM history)
+      would silently produce a lower `retrieval_precision`
+      indistinguishable from a real regression. Fixed: the result is now
+      captured and checked; any failure raises a new
+      `EvaluationIndexingError` rather than proceeding to score every
+      question against a partially-indexed collection.
+      3. **No exception isolation around per-question evaluation** - one
+      question's judge-model timeout/OOM would propagate uncaught,
+      discarding every already-computed result in the same run with
+      nothing written to disk. Fixed: `_run_question()` now catches any
+      exception and records it in a new `EvalQuestionResult.error` field;
+      `build_report()` excludes an errored question from every metric's
+      denominator (a placeholder `hallucinated=False` is not a real
+      measurement) and a new `EvaluationReport.errored_count` surfaces
+      how many were excluded, so a report reader is never misled by a
+      metric silently computed over fewer questions than the full run.
+      4. **The embedded Qdrant client was never closed** - unlike the
+      only other call site (`api/app.py`'s `lifespan`), which explicitly
+      documents why: embedded/local-mode Qdrant holds an exclusive file
+      lock on its storage path for as long as the client stays open.
+      Fixed with a `try`/`finally` around the whole indexing+scoring
+      body.
+      5. **A single `SemanticCache` was shared across every question in
+      one run** - `SemanticCache` serves a hit whenever a query embeds
+      similarly enough (`>=0.95` cosine by default) to an earlier
+      *same-tier* cached query, returning that earlier answer as-is with
+      no error. Two same-tier questions landing close enough would
+      silently score the later one against the earlier's answer - a real
+      risk as the question set grows to include paraphrased/near-
+      duplicate questions, a natural way such sets expand. Fixed: a fresh
+      `SemanticCache()` per question, not per run (`EmbeddingCache`
+      stays shared - it's keyed by exact text, not fuzzy similarity, so
+      it has no equivalent wrong-answer risk).
+      6. **`load_questions()` validated `expected_answerable=True` with
+      empty `expected_source_paths`, but never the reverse** - despite
+      the module's own docstring calling `expected_answerable=False`
+      with non-empty `expected_source_paths` "required to be empty."
+      Fixed with the missing reverse check.
+      7. **`check_faithfulness()` skipped `has_forged_verdict()`
+      entirely**, reasoning the eval corpus is trusted - true for the
+      corpus and question, but the judge prompt also embeds the
+      *generation* model's own live answer text, which isn't eval-fixture
+      content and could in principle echo the same "Answer: CLEAN"-
+      shaped completion bias the injection judge's own docstring
+      documents. Fixed: `has_forged_verdict(answer)` is now checked
+      before the LLM call, matching the three production judges.
+
+      **Two reuse/simplification fixes applied alongside the correctness
+      ones**: `_fetch_cited_source_text()` now looks up the cited chunk
+      via `indexing/upsert.py`'s existing deterministic `_point_id()` and
+      a single `client.retrieve()` by ID, instead of a filtered `scroll()`
+      re-deriving the same `(relative_path, chunk_index)` → point mapping
+      a second way. `report_to_json_dict()` now uses `dataclasses.asdict()`
+      instead of hand-listing every field name twice.
+
+      One finding deliberately left unfixed, recorded rather than
+      dropped: `runner.py`'s own path-normalization one-liner
+      (`relative_path.replace("\\", "/")`) duplicates an equivalent fix
+      already inlined in `ingestion/tagger.py::access_tier_for()` - a
+      real, minor duplication, not consolidated here given the size this
+      PR's fix set had already grown to.
+
+      Re-verified live end-to-end after every fix: same solid metrics
+      (`retrieval_precision: 1.0`, `faithfulness_rate: 0.75`,
+      `hallucination_rate: 0.167`), now with `errored_count: 0` visible
+      in the report. Full suite after fixes: 420 passed, 0 failures.
 - [ ] Logging/tracing across the pipeline
 - [ ] Load test at target scale (10,000 docs × ~50 pages)
 - [ ] Deployment hardening (containerization, health checks)

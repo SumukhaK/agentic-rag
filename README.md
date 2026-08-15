@@ -456,6 +456,47 @@ Shipped so far (`src/agentic_rag/api/`):
   dropped. 27 new tests, **live-verified end-to-end twice** (normal
   index/edit/delete flow, and the restart/deletion-detection scenario).
   Full suite: 378 passed, 0 failures.
+- **Structured evaluation (Phase 8)** — blocked by `docs/REQUIREMENTS.md`'s
+  own Open Items on an `ANTHROPIC_API_KEY` and a written spec, neither of
+  which existed. Pivoted away from Claude with the user: this machine's
+  actual GPU (4GB VRAM) ruled out anything 27B+, so **`qwen2.5:14b-instruct`**
+  was pulled and live-verified (~39s cold load, ~4s warm) before being
+  adopted as the judge. Only faithfulness — the one genuinely subjective
+  dimension — goes through the judge (reusing `orchestration/judge.py`'s
+  existing `run_judge()`); retrieval precision and most of hallucination
+  rate are measured deterministically against a hand-curated
+  `eval/questions.json` with ground-truth expected sources. New
+  `src/agentic_rag/evaluation/` subpackage indexes `eval/corpus/` via
+  `run_sync_cycle()` — the same code path the background sync job uses in
+  production — then answers every question through the real
+  `answer_with_cache()`. **A real bug found by the live run, not the
+  mocked tests**: the "did it answer" check used exact string equality
+  against the canonical fallback instead of the substring-containment
+  convention `answer_with_cache()` itself already uses, so a fallback the
+  model wrapped in a leading space was miscounted as a hallucination — a
+  first live run measured `hallucination_rate: 0.5`, the fix (with a
+  regression test) brought it to the correct `0.167`. 30 new tests, full
+  suite 408 passed.
+  **Self-review found a substantial cluster of further correctness bugs**:
+  the eval Qdrant collection persisted across runs while `previous_
+  snapshot={}` was hardcoded every call — the same "restart loses
+  deletion detection" bug already fixed once in the background sync job,
+  reintroduced in a new context; a renamed corpus file would leave stale
+  chunks stranded forever. Fixed by deleting and recreating the eval
+  collection fresh every run. Also fixed: `run_sync_cycle()`'s failure
+  lists were discarded (a bad corpus document would silently lower
+  `retrieval_precision` with no explanation — now raises loudly instead);
+  no exception isolation around per-question scoring (one judge-model
+  timeout would discard every already-computed result — now isolated
+  into a new `error` field, excluded from every metric); the Qdrant
+  client was never closed; a `SemanticCache` shared across every question
+  risked one question being silently scored against an unrelated
+  earlier question's cached answer; `check_faithfulness()` skipped the
+  forged-verdict guard the three production judges all have, even though
+  it judges the generation model's own live (untrusted) output. 42 tests
+  total, full suite 420 passed. Re-verified live end-to-end after every
+  fix: same metrics, `retrieval_precision: 1.0`, `faithfulness_rate:
+  0.75`, `hallucination_rate: 0.167`, now with `errored_count: 0` visible.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

@@ -63,6 +63,18 @@ Everything runs against a dedicated Qdrant collection/storage path
 same isolation reasoning `eval/README.md`'s own dedicated collection
 already documents.
 
+**Unlike the eval corpus, the loadtest collection is never deleted and
+recreated between runs** - it persists deliberately, since that's what
+makes crash-resumption possible (see below). This means regenerating
+the staged corpus with different `--document-count`/`--pages-per-
+document`/`--seed` values does **not** give you a clean slate on its
+own: old documents from a prior run stay indexed unless you clear
+`LOADTEST_WATCHED_FOLDER_PATH`, `LOADTEST_QDRANT_STORAGE_PATH`, and
+`LOADTEST_SYNC_SNAPSHOT_PATH` first. Clear all three before generating
+a differently-parameterized corpus, or the "fully-loaded index" the
+query-latency phase measures against will silently be a mix of two
+different corpora.
+
 ## Expected duration and resource use
 
 Per README.md's own calibration run (≈10.6s/document at this project's

@@ -1655,18 +1655,48 @@ building unwired infrastructure to fill the slot.
       that reconfiguring one logger doesn't disturb another's already-
       attached handler - 4 for `sync_log.py`, 4 for `eval_log.py`, 3
       verifying `run_sync_loop()`'s wiring, 2 verifying `main()`'s
-      wiring, all mocking `time.monotonic`/the log functions directly
-      rather than asserting on real wall-clock values, learned from this
-      session's own repeated wall-clock-reliance mistake). Full suite:
-      458 passed, 0 failures. **Live-verified end-to-end** against real
-      running instances of both: a real sync cycle against a real
-      one-file corpus produced exactly one `sync_cycle` JSON line
-      (`indexed_count: 1`, accurate `duration_seconds`); a real eval run
-      produced exactly one `evaluation_run` JSON line alongside its
-      existing report file and prints, with the same solid metrics
-      (`retrieval_precision: 1.0`, `faithfulness_rate: 0.75`,
-      `hallucination_rate: 0.167`) this evaluation has consistently
-      measured all session.
+      wiring). Full suite: 458 passed, 0 failures.
+
+      **Self-review (8 finder angles, high effort) found real bugs, not
+      just polish**: (1) `log_sync_cycle_error()`'s `exc_info=True`
+      broke the "one JSON line per event" contract every other
+      observability call keeps - `logging` appends the formatted
+      traceback as extra, non-JSON lines after the message, and
+      produces a spurious `"NoneType: None"` line if ever called with
+      no exception actually active (the module's own test did exactly
+      that, undetected, since it asserted on `getMessage()` rather than
+      the real formatted output). Fixed by capturing the traceback via
+      `traceback.format_exc()` and embedding it as a JSON field instead.
+      (2) `log_sync_cycle()` logged only failure *counts*, not the
+      failing paths - a document silently failing every cycle would
+      show `indexing_failure_count: 1` forever with no way to identify
+      which of 10,000 files it was, contradicting the precedent
+      `request_log.py` already set (logging what a flagged verdict
+      actually flagged). Fixed by adding `ingestion_failure_paths`/
+      `indexing_failure_paths`/`deletion_failure_paths`. (3) 4 of the
+      new tests relied on real, unmocked `time.monotonic()` -
+      `tests/ingestion/test_scheduler.py`'s 3 async loop tests now mock
+      the clock with a deterministic infinite counter (a fixed-length
+      list isn't reliable there, since asyncio's own internals also
+      call `time.monotonic()` an implementation-detail number of
+      times), and `tests/evaluation/test_runner.py`'s synchronous
+      `main()` test now uses an exact fixed sequence. Also fixed: a
+      dead `logger = logging.getLogger(__name__)` left in
+      `scheduler.py` after both its call sites were replaced; and
+      `log_evaluation_run()` now includes a portable `report_id`
+      (`Path(report_path).stem`) alongside the environment-specific
+      `report_path`. One finding deliberately left unfixed and recorded
+      rather than dropped: the payload-building/`_logger.info(json.dumps(...))`
+      pattern is hand-copied across all 4 `log_*` functions instead of
+      a shared emit helper in `logging_setup.py` - real duplication,
+      not applied here given the fix set had already grown large.
+
+      Re-verified live end-to-end after every fix: a real ingestion
+      failure now surfaces its path in the `sync_cycle` log
+      (`ingestion_failure_paths: ["orphan.md"]`); `log_sync_cycle_error()`
+      produces exactly one valid JSON line with an embedded traceback
+      for a real exception. Full suite after fixes: 463 passed, 0
+      failures.
 - [ ] Load test at target scale (10,000 docs × ~50 pages)
 - [ ] Deployment hardening (containerization, health checks)
 

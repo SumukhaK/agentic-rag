@@ -1543,6 +1543,18 @@ building unwired infrastructure to fill the slot.
       (`retrieval_precision: 1.0`, `faithfulness_rate: 0.75`,
       `hallucination_rate: 0.167`), now with `errored_count: 0` visible
       in the report. Full suite after fixes: 420 passed, 0 failures.
+
+      **Follow-up, own PR (`feat/eval-timing-and-readme`)**: added
+      per-question `duration_seconds` (measured with `time.monotonic()`
+      around each question's full round trip) and an aggregate
+      `average_duration_seconds` on `EvaluationReport` — averaged over
+      *every* question including errored ones, since timing is a real
+      measurement even for a question that ultimately failed, unlike the
+      correctness metrics an error has nothing to say about. Wrote
+      [`eval/README.md`](../eval/README.md): the corpus and question set,
+      plain-language definitions of every metric, the latest live run's
+      full per-question breakdown (answers, verdicts, durations), and an
+      overall health assessment. Full suite: 425 passed, 0 failures.
 - [ ] Logging/tracing across the pipeline
 - [ ] Load test at target scale (10,000 docs × ~50 pages)
 - [ ] Deployment hardening (containerization, health checks)

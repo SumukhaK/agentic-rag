@@ -85,6 +85,7 @@ def _dummy_result(question_id="q1", error=None) -> EvalQuestionResult:
         faithfulness=FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN"),
         hallucinated=False,
         error=error,
+        duration_seconds=1.0,
     )
 
 
@@ -342,6 +343,26 @@ def test_run_question_isolates_a_pipeline_failure_into_the_error_field(tmp_path)
     assert result.hallucinated is False
     assert result.retrieval_hit is None
     assert result.faithfulness is None
+    assert result.duration_seconds >= 0.0
+
+
+@patch("agentic_rag.evaluation.runner.check_faithfulness")
+@patch("agentic_rag.evaluation.runner._fetch_cited_source_text")
+@patch("agentic_rag.evaluation.runner.answer_with_cache")
+def test_run_question_records_a_nonnegative_duration_on_success(
+    mock_answer, mock_fetch_text, mock_faithfulness, tmp_path
+):
+    mock_answer.return_value = AnswerResult(
+        text="Arsenal won [1].",
+        citations=[Citation(number=1, relative_path="tier-1/derby.md", chunk_index=0, access_tier="tier-1")],
+    )
+    mock_fetch_text.return_value = "Arsenal beat Chelsea 3-0."
+    mock_faithfulness.return_value = FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN")
+    settings = _settings(tmp_path)
+
+    result = _run_question(_question(), settings=settings, client=object(), embedding_cache=object())
+
+    assert result.duration_seconds >= 0.0
 
 
 # --- run_evaluation ------------------------------------------------------------

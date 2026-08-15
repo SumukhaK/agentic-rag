@@ -15,6 +15,31 @@ class HealthResponse(BaseModel):
     )
 
 
+class ReadinessResponse(BaseModel):
+    """Response body for `GET /health/ready`.
+
+    Distinct from `GET /health`: liveness ("is the process up") and
+    readiness ("can this process actually serve a request right now")
+    are different questions - a process can be alive but unable to serve
+    traffic if Qdrant or Ollama is unreachable. `status`/HTTP status code
+    both reflect the same fact so either a status-code-only check (a
+    container orchestrator) or a body-reading check (a human, a richer
+    monitoring tool) gets the right answer.
+    """
+
+    status: Literal["ready", "not_ready"] = Field(
+        description="\"ready\" only if every dependency in `checks` succeeded."
+    )
+    checks: dict[str, str] = Field(
+        description=(
+            "One entry per dependency checked (currently \"qdrant\" and "
+            "\"ollama\"). Each value is \"ok\", or the error that made the "
+            "check fail - never omitted, so a caller always knows which "
+            "specific dependency is the problem, not just that something is."
+        )
+    )
+
+
 class ConversationTurnModel(BaseModel):
     """One prior turn of the conversation, as the client remembers it.
 

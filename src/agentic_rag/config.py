@@ -18,6 +18,14 @@ class Settings(BaseSettings):
     chunk_size_chars: int = 2000
     access_tiers: list[str] = ["tier-1", "tier-2", "tier-3"]
     ollama_base_url: str = "http://localhost:11434"
+    # Deliberately short and separate from embedding_timeout_seconds/
+    # generation_timeout_seconds - a readiness probe exists to answer
+    # "can this reach Ollama right now," not to wait as long as a real
+    # embedding/generation call would; a slow readiness check defeats
+    # its own purpose (a container orchestrator polling it frequently).
+    # gt=0 matches sync_interval_seconds' own guard: requests.get(...,
+    # timeout=0) has unpredictable behavior rather than failing fast.
+    readiness_check_timeout_seconds: int = Field(default=3, gt=0)
     embedding_model: str = "nomic-embed-text"
     embedding_timeout_seconds: int = 30
     embedding_dimensions: int = 768

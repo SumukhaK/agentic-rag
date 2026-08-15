@@ -97,6 +97,32 @@ def test_settings_embedding_timeout_seconds_overridable_from_env(monkeypatch):
     assert settings.embedding_timeout_seconds == 60
 
 
+def test_settings_defaults_readiness_check_timeout_seconds(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.delenv("READINESS_CHECK_TIMEOUT_SECONDS", raising=False)
+
+    settings = Settings()
+
+    assert settings.readiness_check_timeout_seconds == 3
+
+
+def test_settings_readiness_check_timeout_seconds_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("READINESS_CHECK_TIMEOUT_SECONDS", "5")
+
+    settings = Settings()
+
+    assert settings.readiness_check_timeout_seconds == 5
+
+
+def test_settings_rejects_a_zero_readiness_check_timeout_seconds(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("READINESS_CHECK_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_settings_defaults_qdrant_settings(monkeypatch):
     monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
     for key in ("EMBEDDING_DIMENSIONS", "QDRANT_STORAGE_PATH", "QDRANT_COLLECTION_NAME"):

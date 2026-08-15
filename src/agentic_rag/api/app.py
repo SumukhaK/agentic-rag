@@ -13,6 +13,7 @@ from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
 from agentic_rag.ingestion.scheduler import run_sync_loop
 from agentic_rag.ingestion.snapshot_store import load_snapshot
 from agentic_rag.observability.request_log import configure_request_logging
+from agentic_rag.observability.sync_log import configure_sync_logging
 from agentic_rag.orchestration.semantic_cache import SemanticCache
 
 
@@ -57,14 +58,18 @@ def create_app(settings: Settings) -> FastAPI:
     `run_sync_loop()` cooperates via a `stop_event`/`done_event` pair
     internally rather than relying on cancellation alone.
 
-    `configure_request_logging()` (`observability/request_log.py`) is
-    called here, once per app, rather than at import time in that
+    `configure_request_logging()`/`configure_sync_logging()`
+    (`observability/request_log.py`/`observability/sync_log.py`) are
+    called here, once per app, rather than at import time in either
     module - a module-level side effect on import would run (and attach
-    a handler) even for code that only imports the module to reuse its
-    `log_query_request()`/`VERDICT_*` symbols without ever wanting a
-    handler auto-attached, e.g. a script or a test.
+    a handler) even for code that only imports one of these modules to
+    reuse its `log_*`/`VERDICT_*` symbols without ever wanting a handler
+    auto-attached, e.g. a script or a test. `run_sync_loop()` (started
+    below) runs in this same process, so its logger needs configuring
+    here too, not just the query router's.
     """
     configure_request_logging()
+    configure_sync_logging()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

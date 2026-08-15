@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from datetime import datetime, timezone
 from typing import TextIO
+
+from agentic_rag.observability.logging_setup import configure_json_logging
 
 LOGGER_NAME = "agentic_rag.query"
 
@@ -23,49 +24,16 @@ VERDICT_ERROR = "error"
 _MAX_LOGGED_TEXT_LENGTH = 2000
 
 _logger = logging.getLogger(LOGGER_NAME)
-_active_handler: logging.Handler | None = None
 
 
 def configure_request_logging(*, stream: TextIO | None = None) -> None:
     """Point the `agentic_rag.query` logger at `stream` (default: the
-    *current* `sys.stdout`, looked up when this function runs - not
-    whatever `sys.stdout` happened to be when this module was first
-    imported) as one structured JSON line per `POST /query` request.
-
-    Resolving `sys.stdout` inside the function body, rather than as a
-    `stream: TextIO = sys.stdout` parameter default, matters because a
-    parameter default is evaluated exactly once, at import time - if
-    anything reassigns `sys.stdout` afterwards (a test framework's output
-    capture, a console encoding reconfiguration, a supervisor redirecting
-    stdout post-import), a default bound at import time keeps writing to
-    the stale original object forever, silently, with nothing to indicate
-    the real current stdout stopped receiving these lines.
-
-    Neither the root logger nor uvicorn's own logging config attaches a
-    handler to application-level loggers by default - without this, a
-    plain `logger.info(...)` call would go nowhere (Python's `lastResort`
-    handler only surfaces `WARNING`+ to stderr). `propagate = False` stops
-    the same line from also being formatted/emitted a second time by
-    whatever the root logger's config happens to be.
-
-    Idempotent: the one handler this function previously attached (tracked
-    by direct reference, not by scanning for a marker attribute) is
-    removed before a new one is added, so calling it more than once (app
-    startup running twice in a test process, or re-pointing at a different
-    stream) never leaves the logger writing every line more than once.
+    current `sys.stdout`) as one structured JSON line per `POST /query`
+    request. Thin wrapper around `logging_setup.configure_json_logging()`
+    - see that function's docstring for the idempotency/stdout-timing
+    reasoning shared by every `observability/*_log.py` module.
     """
-    global _active_handler
-
-    if _active_handler is not None:
-        _logger.removeHandler(_active_handler)
-
-    handler = logging.StreamHandler(stream if stream is not None else sys.stdout)
-    handler.setFormatter(logging.Formatter("%(message)s"))
-
-    _logger.addHandler(handler)
-    _active_handler = handler
-    _logger.setLevel(logging.INFO)
-    _logger.propagate = False
+    configure_json_logging(LOGGER_NAME, stream=stream)
 
 
 def _truncate(text: str | None) -> str | None:

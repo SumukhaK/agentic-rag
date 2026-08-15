@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from dataclasses import dataclass
 
 from qdrant_client import QdrantClient
@@ -14,6 +15,7 @@ from agentic_rag.ingestion.pipeline import IngestionFailure
 from agentic_rag.ingestion.snapshot_store import save_snapshot
 from agentic_rag.ingestion.sync import sync_folder
 from agentic_rag.ingestion.watcher import FileState
+from agentic_rag.observability.sync_log import log_sync_cycle, log_sync_cycle_error
 
 logger = logging.getLogger(__name__)
 
@@ -240,12 +242,22 @@ async def run_sync_loop(
     process with no bound, so resilience against an *unanticipated*
     failure mode matters more here than distinguishing "worth retrying"
     from "never will be": a masked bug still surfaces loudly in the logs
-    via `logger.exception()`, it just doesn't get to take down index
-    freshness for the rest of the process's uptime along with it.
+    via `log_sync_cycle_error()` (`observability/sync_log.py`, logged at
+    `ERROR` with the real traceback attached), it just doesn't get to
+    take down index freshness for the rest of the process's uptime along
+    with it.
+
+    Each cycle is timed via `time.monotonic()` and logged as one
+    structured JSON line - `log_sync_cycle()` for a cycle that ran to
+    completion (only when it actually changed something or failed, not
+    on a resting no-op cycle, matching this loop's pre-existing
+    behavior, to avoid one log line every `sync_interval_seconds`
+    forever), or `log_sync_cycle_error()` when the whole cycle raised.
     """
     snapshot = initial_snapshot if initial_snapshot is not None else {}
     while True:
         stop_event = threading.Event()
+        cycle_start = time.monotonic()
         cycle_future = asyncio.ensure_future(
             asyncio.to_thread(
                 run_sync_cycle,
@@ -262,8 +274,11 @@ async def run_sync_loop(
             stop_event.set()
             result, snapshot = await asyncio.shield(cycle_future)
             raise
-        except Exception:
-            logger.exception("sync cycle failed")
+        except Exception as exc:
+            log_sync_cycle_error(
+                error=f"{type(exc).__name__}: {exc}",
+                duration_seconds=time.monotonic() - cycle_start,
+            )
         else:
             save_snapshot(settings.sync_snapshot_path, snapshot)
             if (
@@ -273,13 +288,12 @@ async def run_sync_loop(
                 or result.indexing_failures
                 or result.deletion_failures
             ):
-                logger.info(
-                    "sync cycle: indexed=%d deleted=%d ingestion_failures=%d "
-                    "indexing_failures=%d deletion_failures=%d",
-                    len(result.indexed),
-                    len(result.deleted),
-                    len(result.ingestion_failures),
-                    len(result.indexing_failures),
-                    len(result.deletion_failures),
+                log_sync_cycle(
+                    indexed_count=len(result.indexed),
+                    deleted_count=len(result.deleted),
+                    ingestion_failure_count=len(result.ingestion_failures),
+                    indexing_failure_count=len(result.indexing_failures),
+                    deletion_failure_count=len(result.deletion_failures),
+                    duration_seconds=time.monotonic() - cycle_start,
                 )
         await asyncio.sleep(settings.sync_interval_seconds)

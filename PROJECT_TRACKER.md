@@ -1555,20 +1555,13 @@ building unwired infrastructure to fill the slot.
       plain-language definitions of every metric, the latest live run's
       full per-question breakdown (answers, verdicts, durations), and an
       overall health assessment. Full suite: 425 passed, 0 failures.
-- [x] Logging/tracing across the pipeline — **scoped to `POST /query`
-      request logging for this slice**, own PR, `feat/query-request-
-      logging`. The background sync job (`ingestion/scheduler.py`) and
-      the evaluation runner (`evaluation/runner.py`) remain unobserved -
-      `scheduler.py` already calls `logger.info()`/`logger.exception()`
-      but nothing has ever configured a handler for it (so those calls
-      currently emit nothing), and the eval runner uses bare `print()`.
-      Wiring those into the same `observability/` module is natural
-      follow-up work, not done here - flagged explicitly rather than
-      letting this checkbox imply more than it covers. Scoped with the
-      user via `AskUserQuestion` before writing any code (no existing
-      spec in `docs/REQUIREMENTS.md`, per this repo's own "never invent
-      architecture" rule): structured request logging for `POST /query`
-      end-to-end, as JSON lines to stdout - not full span-based tracing.
+- [x] Logging/tracing across the pipeline — landed in two PRs. First,
+      `feat/query-request-logging`: structured request logging for
+      `POST /query`. Scoped with the user via `AskUserQuestion` before
+      writing any code (no existing spec in `docs/REQUIREMENTS.md`, per
+      this repo's own "never invent architecture" rule): structured
+      request logging for `POST /query` end-to-end, as JSON lines to
+      stdout - not full span-based tracing.
 
       New `src/agentic_rag/observability/` subpackage,
       `request_log.py`: `configure_request_logging()` attaches a
@@ -1626,6 +1619,54 @@ building unwired infrastructure to fill the slot.
       accurate phase timings (`screen_input: 5.0s`, `answer: 70.9s`,
       `total: 75.9s` on this machine's constrained hardware) and the
       correct `cannot_answer` verdict for a corpus with nothing indexed.
+
+      **Second, `feat/sync-and-eval-logging`**: extended structured
+      logging to the two remaining pieces flagged as gaps above - the
+      background sync job (`ingestion/scheduler.py`) and the evaluation
+      runner (`evaluation/runner.py`). Rather than duplicating
+      `request_log.py`'s idempotent-handler-attachment logic a second
+      and third time, extracted the shared primitive
+      (`configure_json_logging(logger_name, *, stream=None)`) into a new
+      `observability/logging_setup.py`, tracking each configured
+      logger's handler independently (keyed by name, not a single
+      module-level reference) so reconfiguring one logger never disturbs
+      another's; `request_log.py::configure_request_logging()` now
+      delegates to it. Two new thin per-domain modules follow the same
+      shape: `observability/sync_log.py` (`log_sync_cycle()` for a cycle
+      that changed something or failed - matching the loop's pre-existing
+      "only log when something happened" behavior, not a line every
+      `sync_interval_seconds` forever; `log_sync_cycle_error()` for a
+      whole cycle raising, logged at `ERROR` with `exc_info=True` so the
+      real traceback is preserved, the same diagnostic value the
+      previous plain `logger.exception()` call provided) and
+      `observability/eval_log.py` (`log_evaluation_run()`, one line
+      summarizing a whole eval run - metrics, report path, run duration -
+      emitted alongside, not instead of, the full JSON report file and
+      the existing human-readable `print()`s). Both `run_sync_loop()`
+      (`ingestion/scheduler.py`) and `main()`
+      (`evaluation/runner.py::main()`) now time themselves via
+      `time.monotonic()`. `configure_sync_logging()` is called once in
+      `api/app.py::create_app()` alongside `configure_request_logging()`
+      (the sync loop runs in the same process); `configure_eval_logging()`
+      is called at the top of the eval runner's own `main()`, since that
+      script runs standalone, outside `create_app()`.
+
+      21 new tests (4 for the shared `logging_setup.py` primitive - including
+      that reconfiguring one logger doesn't disturb another's already-
+      attached handler - 4 for `sync_log.py`, 4 for `eval_log.py`, 3
+      verifying `run_sync_loop()`'s wiring, 2 verifying `main()`'s
+      wiring, all mocking `time.monotonic`/the log functions directly
+      rather than asserting on real wall-clock values, learned from this
+      session's own repeated wall-clock-reliance mistake). Full suite:
+      458 passed, 0 failures. **Live-verified end-to-end** against real
+      running instances of both: a real sync cycle against a real
+      one-file corpus produced exactly one `sync_cycle` JSON line
+      (`indexed_count: 1`, accurate `duration_seconds`); a real eval run
+      produced exactly one `evaluation_run` JSON line alongside its
+      existing report file and prints, with the same solid metrics
+      (`retrieval_precision: 1.0`, `faithfulness_rate: 0.75`,
+      `hallucination_rate: 0.167`) this evaluation has consistently
+      measured all session.
 - [ ] Load test at target scale (10,000 docs × ~50 pages)
 - [ ] Deployment hardening (containerization, health checks)
 

@@ -1453,6 +1453,96 @@ building unwired infrastructure to fill the slot.
       real Ollama (`mistral` generation, `qwen2.5:14b-instruct` judging),
       and real embedded Qdrant: `retrieval_precision: 1.0`,
       `faithfulness_rate: 0.75`, `hallucination_rate: 0.167`.
+
+      **Self-review (8 finder angles, high effort) found a substantial
+      cluster of real correctness bugs, not polish** - the eval feature's
+      whole purpose is producing trustworthy numbers, and several of
+      these directly undermined that:
+
+      1. **The eval Qdrant collection persisted across runs
+      (`eval/qdrant/`, gitignored but not ephemeral) while `previous_
+      snapshot={}` was hardcoded on every call** - the exact "restart
+      loses deletion detection" bug already fixed once in the background
+      sync job (Phase 7), reintroduced independently in a new context.
+      A renamed/removed eval corpus file left its old chunks stranded in
+      the index forever, silently corrupting future runs' metrics with
+      content no longer in the corpus - and a changed `embedding_model`/
+      `embedding_dimensions` between runs would crash the next run with
+      `CollectionSchemaMismatchError` instead of anything actionable.
+      Fixed by deleting and recreating the eval collection fresh at the
+      start of every `run_evaluation()` call - this makes
+      `previous_snapshot={}` correct instead of merely convenient
+      (nothing stale can ever be left to strand), and a schema mismatch
+      becomes structurally impossible.
+      2. **`run_sync_cycle()`'s returned `SyncCycleResult` (ingestion/
+      indexing/deletion failure lists) was discarded entirely** - a
+      corpus document that failed to index (a transient Ollama timeout,
+      plausible given this machine's own documented GPU-OOM history)
+      would silently produce a lower `retrieval_precision`
+      indistinguishable from a real regression. Fixed: the result is now
+      captured and checked; any failure raises a new
+      `EvaluationIndexingError` rather than proceeding to score every
+      question against a partially-indexed collection.
+      3. **No exception isolation around per-question evaluation** - one
+      question's judge-model timeout/OOM would propagate uncaught,
+      discarding every already-computed result in the same run with
+      nothing written to disk. Fixed: `_run_question()` now catches any
+      exception and records it in a new `EvalQuestionResult.error` field;
+      `build_report()` excludes an errored question from every metric's
+      denominator (a placeholder `hallucinated=False` is not a real
+      measurement) and a new `EvaluationReport.errored_count` surfaces
+      how many were excluded, so a report reader is never misled by a
+      metric silently computed over fewer questions than the full run.
+      4. **The embedded Qdrant client was never closed** - unlike the
+      only other call site (`api/app.py`'s `lifespan`), which explicitly
+      documents why: embedded/local-mode Qdrant holds an exclusive file
+      lock on its storage path for as long as the client stays open.
+      Fixed with a `try`/`finally` around the whole indexing+scoring
+      body.
+      5. **A single `SemanticCache` was shared across every question in
+      one run** - `SemanticCache` serves a hit whenever a query embeds
+      similarly enough (`>=0.95` cosine by default) to an earlier
+      *same-tier* cached query, returning that earlier answer as-is with
+      no error. Two same-tier questions landing close enough would
+      silently score the later one against the earlier's answer - a real
+      risk as the question set grows to include paraphrased/near-
+      duplicate questions, a natural way such sets expand. Fixed: a fresh
+      `SemanticCache()` per question, not per run (`EmbeddingCache`
+      stays shared - it's keyed by exact text, not fuzzy similarity, so
+      it has no equivalent wrong-answer risk).
+      6. **`load_questions()` validated `expected_answerable=True` with
+      empty `expected_source_paths`, but never the reverse** - despite
+      the module's own docstring calling `expected_answerable=False`
+      with non-empty `expected_source_paths` "required to be empty."
+      Fixed with the missing reverse check.
+      7. **`check_faithfulness()` skipped `has_forged_verdict()`
+      entirely**, reasoning the eval corpus is trusted - true for the
+      corpus and question, but the judge prompt also embeds the
+      *generation* model's own live answer text, which isn't eval-fixture
+      content and could in principle echo the same "Answer: CLEAN"-
+      shaped completion bias the injection judge's own docstring
+      documents. Fixed: `has_forged_verdict(answer)` is now checked
+      before the LLM call, matching the three production judges.
+
+      **Two reuse/simplification fixes applied alongside the correctness
+      ones**: `_fetch_cited_source_text()` now looks up the cited chunk
+      via `indexing/upsert.py`'s existing deterministic `_point_id()` and
+      a single `client.retrieve()` by ID, instead of a filtered `scroll()`
+      re-deriving the same `(relative_path, chunk_index)` → point mapping
+      a second way. `report_to_json_dict()` now uses `dataclasses.asdict()`
+      instead of hand-listing every field name twice.
+
+      One finding deliberately left unfixed, recorded rather than
+      dropped: `runner.py`'s own path-normalization one-liner
+      (`relative_path.replace("\\", "/")`) duplicates an equivalent fix
+      already inlined in `ingestion/tagger.py::access_tier_for()` - a
+      real, minor duplication, not consolidated here given the size this
+      PR's fix set had already grown to.
+
+      Re-verified live end-to-end after every fix: same solid metrics
+      (`retrieval_precision: 1.0`, `faithfulness_rate: 0.75`,
+      `hallucination_rate: 0.167`), now with `errored_count: 0` visible
+      in the report. Full suite after fixes: 420 passed, 0 failures.
 - [ ] Logging/tracing across the pipeline
 - [ ] Load test at target scale (10,000 docs × ~50 pages)
 - [ ] Deployment hardening (containerization, health checks)

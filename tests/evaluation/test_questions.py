@@ -112,3 +112,28 @@ def test_load_questions_rejects_an_answerable_question_with_no_expected_sources(
 
     with pytest.raises(ValueError, match="expected_source_paths"):
         load_questions(path)
+
+
+def test_load_questions_rejects_an_unanswerable_question_with_expected_sources(tmp_path):
+    # The reverse malformed fixture: expected_answerable=False is
+    # documented as requiring an empty expected_source_paths (there's
+    # nothing to check retrieval precision against for a question that
+    # isn't supposed to be answerable at all) - a non-empty list here is
+    # stale/contradictory data, most likely from copying an answerable
+    # question and forgetting to clear its expected sources.
+    path = tmp_path / "questions.json"
+    _write(
+        path,
+        [
+            {
+                "id": "q1",
+                "query": "Who won the 1850 derby?",
+                "user_tier": "tier-1",
+                "expected_answerable": False,
+                "expected_source_paths": ["tier-1/derby.md"],
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="expected_source_paths"):
+        load_questions(path)

@@ -1,5 +1,5 @@
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from qdrant_client.models import PointStruct, SparseVector
@@ -8,13 +8,21 @@ from agentic_rag.config import Settings
 from agentic_rag.embedding.sparse_client import SparseEmbeddingError, embed_sparse_texts
 from agentic_rag.evaluation.judge import FaithfulnessCheckResult
 from agentic_rag.evaluation.questions import EvalQuestion
+from agentic_rag.evaluation.report import EvalQuestionResult
 from agentic_rag.evaluation.runner import (
+    EvaluationIndexingError,
     _fetch_cited_source_text,
     _report_path_for,
     _run_question,
     run_evaluation,
 )
-from agentic_rag.indexing.qdrant_setup import DENSE_VECTOR_NAME, SPARSE_VECTOR_NAME, ensure_collection, get_client
+from agentic_rag.indexing.qdrant_setup import (
+    DENSE_VECTOR_NAME,
+    SPARSE_VECTOR_NAME,
+    ensure_collection,
+    get_client,
+)
+from agentic_rag.indexing.upsert import _point_id
 from agentic_rag.ingestion.pipeline import IngestionFailure
 from agentic_rag.ingestion.scheduler import SyncCycleResult
 from agentic_rag.orchestration.answer import AnswerResult, Citation
@@ -58,18 +66,46 @@ def _question(**overrides) -> EvalQuestion:
     return EvalQuestion(**defaults)
 
 
+def _empty_sync_result() -> SyncCycleResult:
+    return SyncCycleResult(
+        indexed=[], deleted=[], ingestion_failures=[], indexing_failures=[], deletion_failures=[]
+    )
+
+
+def _dummy_result(question_id="q1", error=None) -> EvalQuestionResult:
+    return EvalQuestionResult(
+        question_id=question_id,
+        query="q",
+        expected_answerable=True,
+        expected_source_paths=["tier-1/a.md"],
+        answer_text="a",
+        cited_paths=["tier-1/a.md"],
+        retrieval_hit=True,
+        answered=True,
+        faithfulness=FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN"),
+        hallucinated=False,
+        error=error,
+    )
+
+
 # --- _fetch_cited_source_text -----------------------------------------------
 
 
 def test_fetch_cited_source_text_returns_the_indexed_chunk_text(tmp_path):
     client = get_client(tmp_path / "qdrant")
     ensure_collection(client, collection_name=COLLECTION, vector_size=3)
+    citation = Citation(
+        number=1, relative_path="tier-1/derby.md", chunk_index=0, access_tier="tier-1"
+    )
     client.upsert(
         collection_name=COLLECTION,
         points=[
             PointStruct(
-                id="00000000-0000-0000-0000-000000000001",
-                vector={DENSE_VECTOR_NAME: [0.1, 0.2, 0.3], SPARSE_VECTOR_NAME: SparseVector(indices=[], values=[])},
+                id=_point_id(citation.relative_path, citation.chunk_index),
+                vector={
+                    DENSE_VECTOR_NAME: [0.1, 0.2, 0.3],
+                    SPARSE_VECTOR_NAME: SparseVector(indices=[], values=[]),
+                },
                 payload={
                     "relative_path": "tier-1/derby.md",
                     "chunk_index": 0,
@@ -79,7 +115,6 @@ def test_fetch_cited_source_text_returns_the_indexed_chunk_text(tmp_path):
             )
         ],
     )
-    citation = Citation(number=1, relative_path="tier-1/derby.md", chunk_index=0, access_tier="tier-1")
 
     text = _fetch_cited_source_text(client, COLLECTION, citation)
 
@@ -113,11 +148,12 @@ def test_run_question_marks_a_retrieval_hit_when_an_expected_source_is_cited(
     mock_faithfulness.return_value = FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN")
     settings = _settings(tmp_path)
 
-    result = _run_question(_question(), settings=settings, client=object(), cache=object(), embedding_cache=object())
+    result = _run_question(_question(), settings=settings, client=object(), embedding_cache=object())
 
     assert result.retrieval_hit is True
     assert result.answered is True
     assert result.hallucinated is False
+    assert result.error is None
 
 
 @patch("agentic_rag.evaluation.runner.check_faithfulness")
@@ -134,7 +170,7 @@ def test_run_question_marks_a_retrieval_miss_when_no_expected_source_is_cited(
     mock_faithfulness.return_value = FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN")
     settings = _settings(tmp_path)
 
-    result = _run_question(_question(), settings=settings, client=object(), cache=object(), embedding_cache=object())
+    result = _run_question(_question(), settings=settings, client=object(), embedding_cache=object())
 
     assert result.retrieval_hit is False
 
@@ -162,7 +198,6 @@ def test_run_question_normalizes_windows_path_separators_before_comparing(
             _question(expected_source_paths=["tier-1/derby.md"]),
             settings=settings,
             client=object(),
-            cache=object(),
             embedding_cache=object(),
         )
 
@@ -183,7 +218,6 @@ def test_run_question_does_not_judge_faithfulness_for_no_expected_source_paths_c
             _question(expected_answerable=False, expected_source_paths=[]),
             settings=settings,
             client=object(),
-            cache=object(),
             embedding_cache=object(),
         )
 
@@ -212,13 +246,11 @@ def test_run_question_recognizes_the_fallback_even_with_surrounding_whitespace(t
             _question(expected_answerable=False, expected_source_paths=[]),
             settings=settings,
             client=object(),
-            cache=object(),
             embedding_cache=object(),
         )
 
     mock_faithfulness.assert_not_called()
     assert result.answered is False
-    assert result.hallucinated is False
     assert result.hallucinated is False
     assert result.retrieval_hit is None
 
@@ -234,7 +266,6 @@ def test_run_question_marks_hallucinated_when_answered_but_should_have_been_unan
             _question(expected_answerable=False, expected_source_paths=[]),
             settings=settings,
             client=object(),
-            cache=object(),
             embedding_cache=object(),
         )
 
@@ -258,10 +289,59 @@ def test_run_question_marks_hallucinated_when_the_answer_is_judged_unfaithful(
     )
     settings = _settings(tmp_path)
 
-    result = _run_question(_question(), settings=settings, client=object(), cache=object(), embedding_cache=object())
+    result = _run_question(_question(), settings=settings, client=object(), embedding_cache=object())
 
     assert result.hallucinated is True
     assert result.faithfulness.is_faithful is False
+
+
+@patch("agentic_rag.evaluation.runner.SemanticCache")
+@patch("agentic_rag.evaluation.runner.answer_with_cache")
+def test_run_question_uses_a_fresh_semantic_cache_per_question(
+    mock_answer, mock_cache_cls, tmp_path
+):
+    # A cache shared across questions in the same run risks a later
+    # question being silently served an earlier, unrelated question's
+    # cached answer if their embeddings happen to be similar enough -
+    # each question must be measured independently.
+    mock_answer.return_value = AnswerResult(text=CANNOT_ANSWER_MESSAGE, citations=[])
+    settings = _settings(tmp_path)
+
+    _run_question(
+        _question(expected_answerable=False, expected_source_paths=[]),
+        settings=settings,
+        client=object(),
+        embedding_cache=object(),
+    )
+    _run_question(
+        _question(expected_answerable=False, expected_source_paths=[]),
+        settings=settings,
+        client=object(),
+        embedding_cache=object(),
+    )
+
+    assert mock_cache_cls.call_count == 2
+
+
+def test_run_question_isolates_a_pipeline_failure_into_the_error_field(tmp_path):
+    # A judge-model timeout/OOM (this session's hardware has a documented
+    # history of exactly this) must not raise out of _run_question and
+    # take the whole eval run's already-computed results down with it.
+    with patch(
+        "agentic_rag.evaluation.runner.answer_with_cache",
+        side_effect=RuntimeError("Ollama timed out"),
+    ):
+        settings = _settings(tmp_path)
+
+        result = _run_question(
+            _question(), settings=settings, client=object(), embedding_cache=object()
+        )
+
+    assert result.error == "RuntimeError: Ollama timed out"
+    assert result.answered is False
+    assert result.hallucinated is False
+    assert result.retrieval_hit is None
+    assert result.faithfulness is None
 
 
 # --- run_evaluation ------------------------------------------------------------
@@ -274,10 +354,7 @@ def test_run_evaluation_indexes_the_eval_corpus_with_the_eval_settings(
     mock_load_questions, mock_sync_cycle, mock_run_question, tmp_path
 ):
     mock_load_questions.return_value = [_question()]
-    mock_sync_cycle.return_value = (
-        SyncCycleResult(indexed=[], deleted=[], ingestion_failures=[], indexing_failures=[], deletion_failures=[]),
-        {},
-    )
+    mock_sync_cycle.return_value = (_empty_sync_result(), {})
     mock_run_question.return_value = _dummy_result()
     settings = _settings(tmp_path)
 
@@ -296,10 +373,7 @@ def test_run_evaluation_runs_every_loaded_question_and_builds_a_report(
     mock_load_questions, mock_sync_cycle, mock_run_question, tmp_path
 ):
     mock_load_questions.return_value = [_question(id="q1"), _question(id="q2")]
-    mock_sync_cycle.return_value = (
-        SyncCycleResult(indexed=[], deleted=[], ingestion_failures=[], indexing_failures=[], deletion_failures=[]),
-        {},
-    )
+    mock_sync_cycle.return_value = (_empty_sync_result(), {})
     mock_run_question.side_effect = [
         _dummy_result(question_id="q1"),
         _dummy_result(question_id="q2"),
@@ -311,6 +385,106 @@ def test_run_evaluation_runs_every_loaded_question_and_builds_a_report(
     assert [r.question_id for r in report.results] == ["q1", "q2"]
 
 
+@patch("agentic_rag.evaluation.runner._run_question")
+@patch("agentic_rag.evaluation.runner.run_sync_cycle")
+@patch("agentic_rag.evaluation.runner.load_questions")
+def test_run_evaluation_recreates_the_eval_collection_before_indexing(
+    mock_load_questions, mock_sync_cycle, mock_run_question, tmp_path
+):
+    # A stale collection left over from a previous run (a renamed/removed
+    # corpus file) must not leak into this run's measurements - each run
+    # starts from a guaranteed-empty collection, not whatever the last
+    # run happened to leave behind.
+    mock_load_questions.return_value = [_question()]
+    mock_sync_cycle.return_value = (_empty_sync_result(), {})
+    mock_run_question.return_value = _dummy_result()
+    settings = _settings(tmp_path)
+    client = get_client(settings.evaluation_qdrant_storage_path)
+    ensure_collection(client, settings.evaluation_qdrant_collection_name, vector_size=999)
+    client.close()
+
+    run_evaluation(settings=settings)
+
+    fresh_client = get_client(settings.evaluation_qdrant_storage_path)
+    try:
+        info = fresh_client.get_collection(settings.evaluation_qdrant_collection_name)
+        assert info.config.params.vectors[DENSE_VECTOR_NAME].size == settings.embedding_dimensions
+    finally:
+        fresh_client.close()
+
+
+@patch("agentic_rag.evaluation.runner._run_question")
+@patch("agentic_rag.evaluation.runner.run_sync_cycle")
+@patch("agentic_rag.evaluation.runner.load_questions")
+def test_run_evaluation_raises_loudly_when_corpus_indexing_has_failures(
+    mock_load_questions, mock_sync_cycle, mock_run_question, tmp_path
+):
+    mock_load_questions.return_value = [_question()]
+    mock_sync_cycle.return_value = (
+        SyncCycleResult(
+            indexed=[],
+            deleted=[],
+            ingestion_failures=[IngestionFailure(relative_path="bad.txt", reason="boom")],
+            indexing_failures=[],
+            deletion_failures=[],
+        ),
+        {},
+    )
+    settings = _settings(tmp_path)
+
+    with pytest.raises(EvaluationIndexingError, match="bad.txt|ingestion"):
+        run_evaluation(settings=settings)
+
+    mock_run_question.assert_not_called()
+
+
+@patch("agentic_rag.evaluation.runner._run_question")
+@patch("agentic_rag.evaluation.runner.run_sync_cycle")
+@patch("agentic_rag.evaluation.runner.load_questions")
+def test_run_evaluation_closes_the_qdrant_client_on_success(
+    mock_load_questions, mock_sync_cycle, mock_run_question, tmp_path
+):
+    mock_load_questions.return_value = [_question()]
+    mock_sync_cycle.return_value = (_empty_sync_result(), {})
+    mock_run_question.return_value = _dummy_result()
+    settings = _settings(tmp_path)
+    fake_client = MagicMock()
+    fake_client.collection_exists.return_value = False
+
+    with patch("agentic_rag.evaluation.runner.get_client", return_value=fake_client):
+        run_evaluation(settings=settings)
+
+    fake_client.close.assert_called_once()
+
+
+@patch("agentic_rag.evaluation.runner._run_question")
+@patch("agentic_rag.evaluation.runner.run_sync_cycle")
+@patch("agentic_rag.evaluation.runner.load_questions")
+def test_run_evaluation_closes_the_qdrant_client_even_when_indexing_fails(
+    mock_load_questions, mock_sync_cycle, mock_run_question, tmp_path
+):
+    mock_load_questions.return_value = [_question()]
+    mock_sync_cycle.return_value = (
+        SyncCycleResult(
+            indexed=[],
+            deleted=[],
+            ingestion_failures=[IngestionFailure(relative_path="bad.txt", reason="boom")],
+            indexing_failures=[],
+            deletion_failures=[],
+        ),
+        {},
+    )
+    settings = _settings(tmp_path)
+    fake_client = MagicMock()
+    fake_client.collection_exists.return_value = False
+
+    with patch("agentic_rag.evaluation.runner.get_client", return_value=fake_client):
+        with pytest.raises(EvaluationIndexingError):
+            run_evaluation(settings=settings)
+
+    fake_client.close.assert_called_once()
+
+
 # --- _report_path_for ---------------------------------------------------------
 
 
@@ -320,20 +494,3 @@ def test_report_path_for_is_deterministic_given_a_fixed_time(tmp_path):
     path = _report_path_for(tmp_path, now=now)
 
     assert path == tmp_path / "eval-20260815T103045.json"
-
-
-def _dummy_result(question_id="q1"):
-    from agentic_rag.evaluation.report import EvalQuestionResult
-
-    return EvalQuestionResult(
-        question_id=question_id,
-        query="q",
-        expected_answerable=True,
-        expected_source_paths=["tier-1/a.md"],
-        answer_text="a",
-        cited_paths=["tier-1/a.md"],
-        retrieval_hit=True,
-        answered=True,
-        faithfulness=FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN"),
-        hallucinated=False,
-    )

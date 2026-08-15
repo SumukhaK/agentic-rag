@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 
 from agentic_rag.evaluation.judge import FaithfulnessCheckResult
@@ -18,6 +19,15 @@ class EvalQuestionResult:
     answer to judge. Forcing a value in either case would silently pull
     the aggregate metrics toward whichever value was chosen, rather than
     correctly excluding the question from that metric's denominator.
+
+    `error` is `None` for a normally-scored question. Set to a message
+    when the question couldn't be scored at all (the pipeline itself
+    raised - a judge-model timeout/OOM, an Ollama connection failure) -
+    every other field is a placeholder in that case (`""`/`[]`/`False`/
+    `None`), not a real measurement, and `build_report()` excludes an
+    errored question from every metric's denominator rather than letting
+    a placeholder `False` silently count as a confirmed "not hallucinated"
+    or similar.
     """
 
     question_id: str
@@ -30,6 +40,7 @@ class EvalQuestionResult:
     answered: bool
     faithfulness: FaithfulnessCheckResult | None
     hallucinated: bool
+    error: str | None
 
 
 @dataclass(frozen=True)
@@ -41,7 +52,8 @@ class EvaluationReport:
     results: list[EvalQuestionResult]
     retrieval_precision: float | None
     faithfulness_rate: float | None
-    hallucination_rate: float
+    hallucination_rate: float | None
+    errored_count: int
 
 
 def build_report(results: list[EvalQuestionResult]) -> EvaluationReport:
@@ -52,13 +64,23 @@ def build_report(results: list[EvalQuestionResult]) -> EvaluationReport:
     `faithfulness` is not `None`) - `None` (not `0.0`) if no question in
     this run had that metric apply at all, since "0% precision" and "no
     answerable questions were run" are different facts a report reader
-    must not confuse. `hallucination_rate` always applies across every
-    question, answerable or not - it's the one metric this evaluation
-    exists to bound regardless of whether the corpus had an answer.
+    must not confuse.
+
+    A question with `error` set is excluded from every metric's
+    denominator, not just skipped for the metrics that don't apply to it
+    - its placeholder `hallucinated=False` is not a real measurement, and
+    counting it would silently pull `hallucination_rate` down as if the
+    system had been proven not to hallucinate on a question it never
+    actually got to answer. `errored_count` surfaces how many questions
+    were excluded this way, so a report reader isn't misled by a metric
+    computed over fewer questions than the full run without knowing it.
     """
-    retrieval_hits = [r.retrieval_hit for r in results if r.retrieval_hit is not None]
+    scored = [r for r in results if r.error is None]
+    errored_count = len(results) - len(scored)
+
+    retrieval_hits = [r.retrieval_hit for r in scored if r.retrieval_hit is not None]
     faithfulness_verdicts = [
-        r.faithfulness.is_faithful for r in results if r.faithfulness is not None
+        r.faithfulness.is_faithful for r in scored if r.faithfulness is not None
     ]
 
     return EvaluationReport(
@@ -69,9 +91,10 @@ def build_report(results: list[EvalQuestionResult]) -> EvaluationReport:
         faithfulness_rate=(sum(faithfulness_verdicts) / len(faithfulness_verdicts))
         if faithfulness_verdicts
         else None,
-        hallucination_rate=(sum(r.hallucinated for r in results) / len(results))
-        if results
-        else 0.0,
+        hallucination_rate=(sum(r.hallucinated for r in scored) / len(scored))
+        if scored
+        else None,
+        errored_count=errored_count,
     )
 
 
@@ -80,29 +103,16 @@ def report_to_json_dict(report: EvaluationReport) -> dict:
     dataclasses, no custom encoder needed) - so any consumer (a CI job, a
     person reading the file, another script) can read it with nothing
     more than `json.loads()`.
+
+    `dataclasses.asdict()` recurses through `EvalQuestionResult` and its
+    nested `FaithfulnessCheckResult` (including the `None` case)
+    automatically - hand-listing every field name here a second time
+    would just be a second place field renames have to be remembered.
     """
     return {
         "retrieval_precision": report.retrieval_precision,
         "faithfulness_rate": report.faithfulness_rate,
         "hallucination_rate": report.hallucination_rate,
-        "results": [
-            {
-                "question_id": r.question_id,
-                "query": r.query,
-                "expected_answerable": r.expected_answerable,
-                "expected_source_paths": r.expected_source_paths,
-                "answer_text": r.answer_text,
-                "cited_paths": r.cited_paths,
-                "retrieval_hit": r.retrieval_hit,
-                "answered": r.answered,
-                "faithfulness": {
-                    "is_faithful": r.faithfulness.is_faithful,
-                    "raw_judge_response": r.faithfulness.raw_judge_response,
-                }
-                if r.faithfulness is not None
-                else None,
-                "hallucinated": r.hallucinated,
-            }
-            for r in report.results
-        ],
+        "errored_count": report.errored_count,
+        "results": [dataclasses.asdict(r) for r in report.results],
     }

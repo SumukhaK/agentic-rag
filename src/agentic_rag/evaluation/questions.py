@@ -34,11 +34,16 @@ def load_questions(path: Path) -> list[EvalQuestion]:
     apply, and stdlib `json` avoids adding a dependency for it.
 
     Raises `ValueError` loudly for a malformed fixture rather than
-    silently producing a question that would skip its own metric: a
-    duplicate `id` (ambiguous which fixture a report line refers to), or
+    silently producing a question that would skip its own metric, or
+    carry stale/contradictory data into the report: a duplicate `id`
+    (ambiguous which fixture a report line refers to),
     `expected_answerable=True` with no `expected_source_paths` (would
     silently exclude itself from the retrieval-precision calculation
-    instead of ever counting as a miss).
+    instead of ever counting as a miss), or `expected_answerable=False`
+    with a non-empty `expected_source_paths` (the reverse contradiction -
+    most likely a fixture copied from an answerable question with
+    `expected_answerable` flipped but its now-meaningless expected
+    sources left behind).
     """
     raw = json.loads(path.read_text())
     questions: list[EvalQuestion] = []
@@ -56,6 +61,12 @@ def load_questions(path: Path) -> list[EvalQuestion]:
             raise ValueError(
                 f"question {question_id!r} is expected_answerable but has no "
                 "expected_source_paths to check retrieval precision against"
+            )
+        if not expected_answerable and expected_source_paths:
+            raise ValueError(
+                f"question {question_id!r} is not expected_answerable but has "
+                f"non-empty expected_source_paths ({expected_source_paths!r}) - "
+                "these must be empty for a question with nothing to retrieve"
             )
 
         questions.append(

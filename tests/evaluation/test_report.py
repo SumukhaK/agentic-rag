@@ -12,6 +12,7 @@ def _result(
     answered=True,
     faithfulness=None,
     hallucinated=False,
+    error=None,
 ):
     return EvalQuestionResult(
         question_id=question_id,
@@ -24,6 +25,7 @@ def _result(
         answered=answered,
         faithfulness=faithfulness,
         hallucinated=hallucinated,
+        error=error,
     )
 
 
@@ -61,7 +63,7 @@ def test_build_report_computes_faithfulness_rate_over_judged_questions_only():
     assert report.faithfulness_rate == 0.5
 
 
-def test_build_report_computes_hallucination_rate_over_all_questions():
+def test_build_report_computes_hallucination_rate_over_all_scored_questions():
     results = [
         _result(question_id="q1", hallucinated=False),
         _result(question_id="q2", hallucinated=True),
@@ -98,6 +100,48 @@ def test_build_report_preserves_the_per_question_results():
     report = build_report(results)
 
     assert [r.question_id for r in report.results] == ["q1", "q2"]
+
+
+def test_build_report_excludes_an_errored_question_from_every_metric():
+    # An errored question's placeholder fields (hallucinated=False,
+    # retrieval_hit=None, etc.) are not real measurements - counting them
+    # would silently pull hallucination_rate down as if the system had
+    # been proven not to hallucinate on a question it never got to answer.
+    results = [
+        _result(question_id="q1", retrieval_hit=True, hallucinated=False),
+        _result(
+            question_id="q2",
+            retrieval_hit=None,
+            answered=False,
+            hallucinated=False,
+            error="GenerationError: Ollama timed out",
+        ),
+    ]
+
+    report = build_report(results)
+
+    assert report.retrieval_precision == 1.0
+    assert report.hallucination_rate == 0.0
+    assert report.errored_count == 1
+
+
+def test_build_report_hallucination_rate_is_none_when_every_question_errored():
+    results = [
+        _result(question_id="q1", answered=False, hallucinated=False, error="boom"),
+    ]
+
+    report = build_report(results)
+
+    assert report.hallucination_rate is None
+    assert report.errored_count == 1
+
+
+def test_build_report_errored_count_is_zero_when_nothing_errored():
+    results = [_result(question_id="q1")]
+
+    report = build_report(results)
+
+    assert report.errored_count == 0
 
 
 def test_report_to_json_dict_is_json_serializable():
@@ -138,9 +182,21 @@ def test_report_to_json_dict_includes_the_per_question_breakdown():
 
 
 def test_report_to_json_dict_represents_a_none_faithfulness_as_null():
-    results = [_result(question_id="q1", expected_answerable=False, answered=False, faithfulness=None)]
+    results = [
+        _result(question_id="q1", expected_answerable=False, answered=False, faithfulness=None)
+    ]
     report = build_report(results)
 
     payload = report_to_json_dict(report)
 
     assert payload["results"][0]["faithfulness"] is None
+
+
+def test_report_to_json_dict_includes_errored_count():
+    results = [_result(question_id="q1", answered=False, error="boom")]
+    report = build_report(results)
+
+    payload = report_to_json_dict(report)
+
+    assert payload["errored_count"] == 1
+    assert payload["results"][0]["error"] == "boom"

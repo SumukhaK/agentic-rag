@@ -1697,8 +1697,11 @@ building unwired infrastructure to fill the slot.
       produces exactly one valid JSON line with an embedded traceback
       for a real exception. Full suite after fixes: 463 passed, 0
       failures.
-- [ ] Load test at target scale (10,000 docs × ~50 pages) — still not
-      started. A separate, explicitly theoretical exercise was done
+- [~] Load test at target scale (10,000 docs × ~50 pages) — code to
+      actually run it now exists (own PR below,
+      `feat/loadtest-corpus-and-runner`); the real multi-hour run itself
+      has not been executed yet. A separate, explicitly theoretical
+      exercise was done
       instead, at the user's request, own PR
       `docs/scaling-to-150k-analysis`: [README.md's "Scaling to 150,000
       Documents"](../README.md) works out what would break and what
@@ -1733,8 +1736,158 @@ building unwired infrastructure to fill the slot.
       "decided plan" language that contradicted the section's own
       "theoretical, not proposed as work now" framing, and a slightly
       understated `EmbeddingCache` range from mixed KB/GB unit
-      conventions. The real 10,000-document Phase 8 load test above
-      remains not started.
+      conventions.
+
+      **Building the real thing**: scoped with the user via
+      `AskUserQuestion` before writing anything — no real 10,000-document
+      football corpus exists to source, so the corpus is
+      **synthetic, football-domain-styled** (not real downloaded text);
+      and the run targets **full scale** (10,000 docs, not a smaller
+      sample), as a long-lived operation that must survive a crash/
+      restart. Entered plan mode given the genuine scope (new top-level
+      directory, new Settings block, a ~30-hour unattended operation on
+      hardware with a documented GPU-OOM history) before writing code.
+
+      New `src/agentic_rag/loadtest/corpus_generator.py`:
+      `generate_corpus()` writes synthetic football-domain-styled
+      markdown documents (randomized teams/scores/tactics/analysis,
+      sized to the calibration run's own ~3,000-chars/page convention),
+      distributed across `access_tiers` subfolders, to a staging
+      directory. Deterministic from a fixed `--seed` (same seed
+      regenerates byte-identical output), so the ~1.5GB a real
+      10,000-document corpus would take never needs to be committed —
+      only the generator script is. **Every paragraph embeds a
+      `(doc_index, paragraph_index)` reference tag**, which structurally
+      guarantees no two chunk-sized text windows anywhere in the corpus
+      are identical — closing off the exact pitfall the 150k
+      calibration run hit once already (a small, cycling paragraph pool
+      let `EmbeddingCache` silently skip re-embedding most chunks,
+      inflating measured throughput ~2.7×), by construction rather than
+      by hoping the word pools are large enough.
+
+      New `src/agentic_rag/loadtest/runner.py`: reuses the real
+      production pipeline end to end rather than building a parallel
+      one. `run_sync_cycle()` (`ingestion/scheduler.py`) processes its
+      entire current disk-vs-snapshot diff in one call with no internal
+      batch limit — dropping all 10,000 generated files into a watched
+      folder before the first cycle would mean zero checkpointing until
+      one ~30-hour cycle finishes (`save_snapshot()` only ever runs
+      *after* a cycle returns). Instead, the runner **drip-feeds
+      batches** (`LOADTEST_BATCH_SIZE`, default 200) from the staging
+      directory into a dedicated watched folder, calling
+      `run_sync_cycle()` + `save_snapshot()` once per batch — exactly
+      what `run_sync_loop()` already does per cycle in production, just
+      synchronous and batch-driven instead of timer-driven. A crash
+      loses at most one batch (~35 min at the default size), not a day.
+      **Resumability needs no new state file**: on restart, `_next_batch()`
+      recomputes "which staged files aren't yet in the watched folder"
+      as the remaining work — a plain directory diff — and
+      `run_sync_cycle()`'s own diff against the last-saved snapshot
+      correctly picks up any file that was already copied but not yet
+      indexed when a crash landed mid-batch.
+
+      A second phase closes a real gap in the 150k theoretical analysis,
+      which only ever measured *ingestion* throughput:
+      `docs/REQUIREMENTS.md` §2's actual NFR is "fast and reliable" for
+      *querying*. After the full corpus is indexed, the runner answers
+      4 fixed representative queries through `answer_with_cache()` — the
+      same function `POST /query` calls, the same pattern
+      `evaluation/runner.py::_run_question()` already uses — against
+      the fully-loaded index, recording real query latency at target
+      scale.
+
+      New `src/agentic_rag/observability/loadtest_log.py`
+      (`log_loadtest_batch`/`log_loadtest_run_complete`), mirroring
+      `sync_log.py`'s exact shape, so a ~30-hour unattended run's
+      progress is checkable by tailing structured JSON logs, not just
+      inferred from a final report. New top-level `loadtest/README.md`
+      (mirrors `eval/README.md`): how to run the generator then the
+      runner, expected duration/resource use, and how crash-resumption
+      works. `loadtest/corpus_staging/`, `watched/`, `qdrant/`,
+      `results/`, and `sync_snapshot.json` are gitignored — regenerable
+      from the committed script + fixed seed, not committed.
+
+      28 new tests (uniqueness/determinism/tier-distribution for the
+      generator; `_next_batch()`'s resumability logic including the
+      already-copied-but-unindexed case; `run_load_test()`'s batch-loop
+      orchestration, snapshot checkpointing, dedicated-collection
+      isolation, and failure counting, all mocking `run_sync_cycle()`
+      the same way `evaluation/runner.py`'s own tests mock it, so no
+      real Ollama is needed to run the suite; the new structured
+      logger). Full suite: 510 passed, 0 failures.
+
+      **Live-verified end to end against real Ollama + real embedded
+      Qdrant** before trusting this with a 30-hour unattended run: a
+      12-document smoke run completed both phases (ingestion + 4 real
+      query latencies: 55s/91.5s/134.5s/48.3s) and wrote a real report.
+      A second, 20-document run was **deliberately killed mid-batch**
+      (a `timeout` cutting the process while a batch's files were
+      already copied into the watched folder but not yet reflected in
+      the snapshot) and then resumed: the resumed run correctly folded
+      the stranded files into its very next cycle, finished all 20
+      documents with zero data loss and zero duplicate re-indexing, and
+      the snapshot showed exactly 20 unique entries at the end.
+
+      **This PR is code only.** The real 10,000-document/~50-page load
+      test — expected to take on the order of a day of continuous
+      indexing per the calibration run's own measured rate — and the
+      results write-up (including comparing real numbers against the
+      150k theoretical extrapolation's predictions) are a deliberately
+      separate, later step, not started here.
+
+      **Self-review found a critical bug this session's own live
+      smoke-testing hadn't caught**: a crash landing after the corpus's
+      *final* batch was copied into the watched folder but before it was
+      indexed would leave those documents permanently un-indexed with no
+      error - `_next_batch()` alone would find nothing left to *copy* on
+      restart and the loop stopped before ever re-running
+      `run_sync_cycle()` for the stranded files. Fixed by always running
+      one confirming `run_sync_cycle()` call even when nothing new was
+      copied - `sync_folder()` diffs the *entire* watched folder against
+      the snapshot every call, not just newly-copied files, so this
+      catches stranded work regardless of which batch it was stranded
+      on. Re-verified live: 6 documents placed directly in the watched
+      folder with no snapshot at all (simulating the worst case) were
+      correctly indexed on the very next run.
+
+      9 findings confirmed and fixed in total: the last-batch-crash bug
+      above; `corpus_generator.py`'s hardcoded `tier-1/2/3` folders and
+      `runner.py`'s `batch_settings` never overriding `access_tiers` -
+      a customized `ACCESS_TIERS` env var would have silently zeroed out
+      ingestion and then crashed the query-latency phase (fixed via a
+      single shared `DEFAULT_ACCESS_TIERS` constant, decoupling the load
+      test from the main app's configuration entirely); the query-
+      latency phase running unconditionally even when nothing was
+      indexed, producing a misleadingly "successful"-looking report
+      (fixed: skipped when `total_indexed_all_time == 0`); non-atomic
+      `shutil.copyfile()` in `_copy_batch()` risking a truncated,
+      never-retried file on a crash mid-copy (fixed via a temp-file +
+      `Path.replace()`, matching `snapshot_store.save_snapshot()`'s own
+      established atomic-write pattern); `_run_query_latency_phase()`
+      sharing one `SemanticCache()` across all 4 representative queries
+      - two share a tier - contradicting `evaluation/runner.py`'s own
+      documented per-question isolation (fixed: fresh cache per query);
+      `log_loadtest_batch()` missing `ingestion_failure_paths` (fixed,
+      matching `sync_log.py`'s symmetric treatment of both failure
+      kinds); the report undercounting true progress across a resumed
+      run's multiple invocations (fixed: `LoadTestReport` now carries
+      both `total_indexed`, this invocation's count, and
+      `total_indexed_all_time`, derived from the final snapshot's size);
+      and `_next_batch()` re-walking the entire, unchanging staged
+      corpus on every batch call (fixed: the staged file list is now
+      listed once per run and reused, not re-derived per batch). Not
+      fixed, flagged as pre-existing tracked debt out of this PR's scope
+      (`PROJECT_TRACKER.md`'s own still-open Phase 7 item on
+      `answer_with_cache()`'s parameter count): the query-latency
+      phase's ~19-parameter call extends that same pattern to a third
+      call site.
+
+      14 new/changed tests covering the fixes (the stranded-final-batch
+      recovery case, the dedicated-access-tiers isolation at both the
+      ingestion and query-latency call sites, the skip-when-empty gate,
+      the true-cumulative-total reporting, and the fresh-cache-per-query
+      property). Full suite after fixes: 518 passed, 0 failures.
+      Re-verified live against real Ollama + real embedded Qdrant.
 - [x] Deployment hardening (containerization, health checks) — own PR,
       `feat/deployment-hardening`. Scoped with the user via
       `AskUserQuestion` before writing anything (`docs/REQUIREMENTS.md`

@@ -11,6 +11,18 @@ from typing import Sequence
 # measured numbers directly comparable to that theoretical extrapolation.
 CHARS_PER_PAGE = 3000
 
+# The load test's own, dedicated access-tier list - deliberately NOT
+# Settings.access_tiers. The generated corpus's folder layout and every
+# loadtest component that needs to agree on tier names (this generator,
+# runner.py's batch_settings override, and its representative queries'
+# known_tiers) import this single constant, so the load test stays fully
+# self-contained regardless of what ACCESS_TIERS happens to be configured
+# to for the real app - a customized ACCESS_TIERS env var would otherwise
+# make every generated tier-1/tier-2/tier-3 document fail tagging
+# (corpus folders wouldn't match the configured tiers), silently zeroing
+# out the whole ingestion phase.
+DEFAULT_ACCESS_TIERS: tuple[str, ...] = ("tier-1", "tier-2", "tier-3")
+
 _CITY_NAMES = [
     "Ashford", "Brackenfield", "Corvale", "Dunmoor", "Elmsworth", "Fenwick",
     "Gladstone", "Harrow Vale", "Ironbridge", "Kestrel Bay", "Lansdowne",
@@ -116,7 +128,7 @@ def generate_corpus(
     *,
     document_count: int = 10_000,
     pages_per_document: int = 50,
-    access_tiers: Sequence[str] = ("tier-1", "tier-2", "tier-3"),
+    access_tiers: Sequence[str] = DEFAULT_ACCESS_TIERS,
     seed: int = 0,
 ) -> None:
     """Write `document_count` synthetic, football-domain-styled markdown

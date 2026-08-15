@@ -822,13 +822,30 @@ Shipped so far (`src/agentic_rag/api/`):
   state file, since `_next_batch()` just diffs the staging directory
   against what's already been copied. A second phase measures real query
   latency against the fully-loaded index, closing a gap the
-  ingestion-only 150k analysis left open. 28 new tests, full suite 510
-  passed. **Live-verified against real Ollama + real Qdrant**: a
-  12-document run completed both phases end-to-end, and a 20-document
-  run was deliberately killed mid-batch and resumed, finishing with zero
-  data loss or duplication. **This PR is code only** — the real
-  ~30-hour, 10,000-document run itself is a separate, not-yet-started
-  step (see [`loadtest/README.md`](loadtest/README.md)).
+  ingestion-only 150k analysis left open. Self-review found and fixed a
+  critical bug the initial live smoke-testing had missed: a crash after
+  the corpus's *final* batch was copied but before it was indexed would
+  silently skip those documents forever — fixed by always running one
+  confirming `run_sync_cycle()` call even when nothing new was copied,
+  re-verified live by placing 6 documents directly in the watched folder
+  with no snapshot at all and confirming they were correctly indexed on
+  the next run. Also fixed: a hardcoded-tier vs. configurable-
+  `access_tiers` mismatch that could silently zero out ingestion and
+  crash the query-latency phase (a shared `DEFAULT_ACCESS_TIERS`
+  constant now decouples the load test from the main app's config
+  entirely); the query-latency phase running even when nothing was
+  indexed; a non-atomic file copy that could strand a truncated file;
+  a shared `SemanticCache` across representative queries; a missing
+  `ingestion_failure_paths` log field; and a report that undercounted
+  progress across a resumed run (now reports both a per-invocation and
+  a true cumulative total). 41 new tests, full suite 518 passed.
+  **Live-verified against real Ollama + real Qdrant**: a 12-document run
+  completed both phases end-to-end, a 20-document run was deliberately
+  killed mid-batch and resumed with zero data loss, and (after the fix
+  pass) the exact final-batch-crash scenario was reproduced and
+  confirmed recovered. **This PR is code only** — the real ~30-hour,
+  10,000-document run itself is a separate, not-yet-started step (see
+  [`loadtest/README.md`](loadtest/README.md)).
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

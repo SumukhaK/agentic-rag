@@ -17,6 +17,7 @@ def _log_loadtest_batch(**overrides):
         indexed_count=200,
         ingestion_failure_count=0,
         indexing_failure_count=0,
+        ingestion_failure_paths=[],
         indexing_failure_paths=[],
         duration_seconds=2100.0,
         cumulative_indexed=200,
@@ -42,6 +43,7 @@ def test_log_loadtest_batch_message_is_valid_json_with_expected_fields(caplog):
             indexed_count=198,
             ingestion_failure_count=1,
             indexing_failure_count=1,
+            ingestion_failure_paths=["tier-1/doc_00500.md"],
             indexing_failure_paths=["tier-2/doc_00601.md"],
             duration_seconds=2050.5,
             cumulative_indexed=798,
@@ -56,6 +58,7 @@ def test_log_loadtest_batch_message_is_valid_json_with_expected_fields(caplog):
     assert payload["indexed_count"] == 198
     assert payload["ingestion_failure_count"] == 1
     assert payload["indexing_failure_count"] == 1
+    assert payload["ingestion_failure_paths"] == ["tier-1/doc_00500.md"]
     assert payload["indexing_failure_paths"] == ["tier-2/doc_00601.md"]
     assert payload["duration_seconds"] == 2050.5
     assert payload["cumulative_indexed"] == 798
@@ -71,11 +74,14 @@ def test_log_loadtest_batch_includes_failure_paths_not_just_counts():
     configure_loadtest_logging(stream=stream)
 
     _log_loadtest_batch(
+        ingestion_failure_count=1,
+        ingestion_failure_paths=["tier-1/doc_00013.md"],
         indexing_failure_count=1,
         indexing_failure_paths=["tier-1/doc_00042.md"],
     )
 
     payload = json.loads(stream.getvalue().strip())
+    assert payload["ingestion_failure_paths"] == ["tier-1/doc_00013.md"]
     assert payload["indexing_failure_paths"] == ["tier-1/doc_00042.md"]
 
 

@@ -1834,6 +1834,60 @@ building unwired infrastructure to fill the slot.
       results write-up (including comparing real numbers against the
       150k theoretical extrapolation's predictions) are a deliberately
       separate, later step, not started here.
+
+      **Self-review found a critical bug this session's own live
+      smoke-testing hadn't caught**: a crash landing after the corpus's
+      *final* batch was copied into the watched folder but before it was
+      indexed would leave those documents permanently un-indexed with no
+      error - `_next_batch()` alone would find nothing left to *copy* on
+      restart and the loop stopped before ever re-running
+      `run_sync_cycle()` for the stranded files. Fixed by always running
+      one confirming `run_sync_cycle()` call even when nothing new was
+      copied - `sync_folder()` diffs the *entire* watched folder against
+      the snapshot every call, not just newly-copied files, so this
+      catches stranded work regardless of which batch it was stranded
+      on. Re-verified live: 6 documents placed directly in the watched
+      folder with no snapshot at all (simulating the worst case) were
+      correctly indexed on the very next run.
+
+      9 findings confirmed and fixed in total: the last-batch-crash bug
+      above; `corpus_generator.py`'s hardcoded `tier-1/2/3` folders and
+      `runner.py`'s `batch_settings` never overriding `access_tiers` -
+      a customized `ACCESS_TIERS` env var would have silently zeroed out
+      ingestion and then crashed the query-latency phase (fixed via a
+      single shared `DEFAULT_ACCESS_TIERS` constant, decoupling the load
+      test from the main app's configuration entirely); the query-
+      latency phase running unconditionally even when nothing was
+      indexed, producing a misleadingly "successful"-looking report
+      (fixed: skipped when `total_indexed_all_time == 0`); non-atomic
+      `shutil.copyfile()` in `_copy_batch()` risking a truncated,
+      never-retried file on a crash mid-copy (fixed via a temp-file +
+      `Path.replace()`, matching `snapshot_store.save_snapshot()`'s own
+      established atomic-write pattern); `_run_query_latency_phase()`
+      sharing one `SemanticCache()` across all 4 representative queries
+      - two share a tier - contradicting `evaluation/runner.py`'s own
+      documented per-question isolation (fixed: fresh cache per query);
+      `log_loadtest_batch()` missing `ingestion_failure_paths` (fixed,
+      matching `sync_log.py`'s symmetric treatment of both failure
+      kinds); the report undercounting true progress across a resumed
+      run's multiple invocations (fixed: `LoadTestReport` now carries
+      both `total_indexed`, this invocation's count, and
+      `total_indexed_all_time`, derived from the final snapshot's size);
+      and `_next_batch()` re-walking the entire, unchanging staged
+      corpus on every batch call (fixed: the staged file list is now
+      listed once per run and reused, not re-derived per batch). Not
+      fixed, flagged as pre-existing tracked debt out of this PR's scope
+      (`PROJECT_TRACKER.md`'s own still-open Phase 7 item on
+      `answer_with_cache()`'s parameter count): the query-latency
+      phase's ~19-parameter call extends that same pattern to a third
+      call site.
+
+      14 new/changed tests covering the fixes (the stranded-final-batch
+      recovery case, the dedicated-access-tiers isolation at both the
+      ingestion and query-latency call sites, the skip-when-empty gate,
+      the true-cumulative-total reporting, and the fresh-cache-per-query
+      property). Full suite after fixes: 518 passed, 0 failures.
+      Re-verified live against real Ollama + real embedded Qdrant.
 - [x] Deployment hardening (containerization, health checks) — own PR,
       `feat/deployment-hardening`. Scoped with the user via
       `AskUserQuestion` before writing anything (`docs/REQUIREMENTS.md`

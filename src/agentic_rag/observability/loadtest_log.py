@@ -33,6 +33,7 @@ def log_loadtest_batch(
     indexed_count: int,
     ingestion_failure_count: int,
     indexing_failure_count: int,
+    ingestion_failure_paths: list[str],
     indexing_failure_paths: list[str],
     duration_seconds: float,
     cumulative_indexed: int,
@@ -44,10 +45,10 @@ def log_loadtest_batch(
     A run this long (~30 hours at target scale) needs progress checkable
     by tailing a log, not just a final report at the end - `cumulative_*`
     fields let a reader compute real-time throughput and estimate time
-    remaining without replaying every prior line. `indexing_failure_paths`
-    (not just a count) matches `sync_log.py::log_sync_cycle()`'s own
-    reasoning: at target scale, which document is failing is what a
-    reader actually needs to debug it.
+    remaining without replaying every prior line. `ingestion_failure_paths`/
+    `indexing_failure_paths` (not just counts) matches
+    `sync_log.py::log_sync_cycle()`'s own reasoning: at target scale,
+    which document is failing is what a reader actually needs to debug it.
     """
     payload = {
         "event": "loadtest_batch",
@@ -57,6 +58,7 @@ def log_loadtest_batch(
         "indexed_count": indexed_count,
         "ingestion_failure_count": ingestion_failure_count,
         "indexing_failure_count": indexing_failure_count,
+        "ingestion_failure_paths": ingestion_failure_paths,
         "indexing_failure_paths": indexing_failure_paths,
         "duration_seconds": duration_seconds,
         "cumulative_indexed": cumulative_indexed,

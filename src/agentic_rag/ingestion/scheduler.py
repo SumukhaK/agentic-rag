@@ -324,13 +324,28 @@ async def run_sync_loop(
 
         if time.monotonic() - last_backup_time >= settings.qdrant_backup_interval_seconds:
             backup_start = time.monotonic()
-            try:
-                backup_path = await asyncio.to_thread(
+            backup_future = asyncio.ensure_future(
+                asyncio.to_thread(
                     backup_qdrant_storage,
                     settings.qdrant_storage_path,
                     settings.qdrant_backup_path,
                     retention_count=settings.qdrant_backup_retention_count,
                 )
+            )
+            try:
+                backup_path = await asyncio.shield(backup_future)
+            except asyncio.CancelledError:
+                # Same reasoning as the cycle above: cancelling this
+                # coroutine can't stop the underlying OS thread mid-
+                # shutil.copytree(), and letting CancelledError propagate
+                # immediately would let this loop return - and the
+                # caller proceed to client.close() - while that thread is
+                # still reading/writing the same files the client is
+                # about to close out from under it. Wait for the real
+                # result (discarded; nothing to log during shutdown)
+                # before re-raising.
+                await asyncio.shield(backup_future)
+                raise
             except Exception as exc:  # noqa: BLE001 - a failed backup must not stall index freshness
                 log_qdrant_backup_error(
                     error=f"{type(exc).__name__}: {exc}",

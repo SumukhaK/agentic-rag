@@ -661,7 +661,12 @@ Log of decisions made explicitly during planning, for traceability:
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 
-None currently open.
+- Per-pipeline-stage ingestion failure logging (which stage - conversion,
+  chunking, tagging, or validation - a document failed at, not just the
+  exception string bundled into the next `sync_cycle` log line). Raised
+  and scoped in §15's "Logging granularity" discussion; flagged as a
+  real, low-cost improvement, not implemented in that pass because it
+  wasn't part of what was asked for at the time.
 
 ## 15. Miscellaneous Discussions
 
@@ -767,6 +772,27 @@ Two different failure modes were initially conflated and needed separating:
    the tradeoff is a meaningfully different, riskier feature than taking
    the backup itself, and nothing in this discussion asked for silent
    automatic data-loss decisions.
+
+   **Known limitation, not fixed**: `last_backup_time` resets to "now" on
+   every process restart (it's an in-memory value, not persisted), so the
+   first backup of a fresh process only happens once a full
+   `qdrant_backup_interval_seconds` has elapsed *in that process's own
+   uptime*. A process stuck in a crash-loop shorter than the interval
+   (default one hour) could go an extended period - in the worst case,
+   indefinitely - without ever completing a backup, with no log line or
+   alert calling that out specifically. Persisting `last_backup_time` to
+   disk (the same pattern `sync_snapshot_path` already uses for surviving
+   restarts) would close this, but wasn't built here - flagged as a real
+   gap, left as a candidate follow-up rather than expanding this pass's
+   scope further.
+
+   **Self-review found and fixed 4 real issues** in the initial
+   implementation, all before merge - see `PROJECT_TRACKER.md`'s entry
+   for the specifics (a `.lock`-file collision that would have made
+   every real backup silently fail, a missed `asyncio.shield()` on the
+   backup call mirroring a already-fixed race in the sync cycle, orphaned
+   `.tmp` directories never cleaned up on a failed copy, and a
+   collision-safety gap between the temp and final directory names).
 
 ### API versioning
 

@@ -857,3 +857,61 @@ def test_run_sync_loop_continues_after_a_backup_raises(
     kwargs = mock_log_backup_error.call_args.kwargs
     assert kwargs["error"] == "OSError: disk full"
     assert kwargs["duration_seconds"] >= 0.0
+
+
+def test_run_sync_loop_waits_for_the_in_flight_backup_before_propagating_cancellation(tmp_path):
+    # The same use-after-close race the sync cycle's own shielding exists
+    # to prevent (see test_run_sync_loop_waits_for_the_in_flight_cycle_
+    # before_propagating_cancellation's docstring) applies identically to
+    # the backup call: cancelling a task awaiting asyncio.to_thread()
+    # can't stop the underlying OS thread mid-shutil.copytree(). An
+    # unshielded backup call would let CancelledError propagate while
+    # that thread is still running, letting app.py's lifespan proceed to
+    # client.close() concurrently with it - reproduced as a real gap by
+    # 3 independent review angles for PR #66 before this fix.
+    backup_started = threading.Event()
+    backup_finished = threading.Event()
+
+    def fake_backup(storage_path, backup_dir, *, retention_count):
+        # Simulate a backup that's genuinely still copying when
+        # cancellation arrives.
+        backup_started.set()
+        time.sleep(0.3)
+        backup_finished.set()
+        return backup_dir / "fake-backup"
+
+    # sync_interval_seconds is also shrunk (not just qdrant_backup_interval_
+    # seconds) - the interval check only runs once per outer while-loop
+    # iteration, and with the default 60s sync_interval_seconds there is
+    # exactly one such check within any short test window. If real
+    # execution happens to be faster than the configured backup interval
+    # on that single check (a real, observed race - genuine mocked-cycle
+    # execution can complete in well under 10ms), the test would then have
+    # no second chance for 60 real seconds. Shrinking sync_interval_
+    # seconds too means many iterations happen quickly, so the check gets
+    # many chances as real elapsed time accumulates, rather than betting
+    # everything on exactly one.
+    settings = _loop_settings(tmp_path).model_copy(
+        update={"qdrant_backup_interval_seconds": 0.05, "sync_interval_seconds": 0.001}
+    )
+
+    async def _run():
+        with (
+            patch("agentic_rag.ingestion.scheduler.run_sync_cycle", return_value=(_empty_result(), {})),
+            patch("agentic_rag.ingestion.scheduler.save_snapshot"),
+            patch("agentic_rag.ingestion.scheduler.backup_qdrant_storage", side_effect=fake_backup),
+        ):
+            task = asyncio.ensure_future(run_sync_loop(settings=settings, client=object()))
+            for _ in range(500):
+                if backup_started.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert backup_started.is_set(), "backup never started - interval check didn't trigger"
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            # By the time `await task` raises, the in-flight backup must
+            # have genuinely finished - not just been asked to.
+            assert backup_finished.is_set()
+
+    asyncio.run(_run())

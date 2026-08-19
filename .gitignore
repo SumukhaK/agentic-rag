@@ -21,6 +21,7 @@ loadtest/watched/
 loadtest/qdrant/
 loadtest/results/
 loadtest/sync_snapshot.json
+loadtest/run.log
 
 # OS
 .DS_Store

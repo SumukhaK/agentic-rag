@@ -323,6 +323,56 @@ to," not a roadmap:
   and 150,000 documents is roughly the scale where that tradeoff's cost
   becomes visible in the numbers above.
 
+## Real 10,000-Document Load Test — Results
+
+Everything above this section is theoretical, extrapolated from a
+10-document calibration run. This section is the real thing: an actual
+attempt at `docs/REQUIREMENTS.md` §2's real target (10,000 documents,
+~50 pages average), run against this project's own development machine
+(GTX 1650 Ti, 4GB VRAM, 16GB RAM) via `src/agentic_rag/loadtest/` (see
+[`loadtest/README.md`](loadtest/README.md) for the full write-up).
+
+**It did not complete.** The run was stopped at **6,000 / 10,000
+documents (60%)** after repeatedly hitting a real memory-scaling wall
+this hardware couldn't sustain past that point:
+
+- Per-document indexing time held roughly steady (≈17.5s/doc) for the
+  first 4,800 documents, then degraded **~3x** (to ≈52.2s/doc) for the
+  next 1,200 — not gradually, but as a clear step change.
+- `nvidia-smi` ruled out GPU thermal throttling as the cause (60-62°C,
+  idle between calls). The actual cause was system RAM exhaustion: free
+  memory (16GB total) was repeatedly observed down to **~1GB free**, with
+  the load-test process's own resident memory climbing past 6.6GB and
+  still growing as the embedded Qdrant collection's HNSW index grew.
+- The process died once with no error and no recorded reboot (consistent
+  with a silent OOM kill), and after two separate resumes (the
+  crash-recovery design worked correctly both times — no data was lost)
+  hit the identical wall again within hours each time, making zero
+  further progress while the system thrashed under the same memory
+  pressure.
+- 5,999 of 6,000 documents indexed cleanly (1 isolated failure);
+  measured chunk count (79.4/doc) and storage (≈0.94 MB/doc) both closely
+  matched the 150k analysis's own 10-document calibration — the failure
+  mode here is specifically about *sustained* memory growth over a real
+  run, not a discrepancy in the underlying per-document numbers.
+
+**This confirms, with real measured data, the exact risk the 150k
+theoretical analysis above could only flag as unquantified** ("HNSW
+insert cost is known to grow with graph size... neither effect is
+quantified here") — except the wall was hit at 6,000 documents, short of
+even this project's own real target, not just in a 15x-larger
+hypothetical. The fix is architectural, not a load-test change: moving
+off embedded/in-memory Qdrant (a real server with on-disk vector storage,
+or sharding) before this scale is attempted again, exactly as the "where
+the current architecture breaks down" section above already concluded —
+now with a real, reproduced failure behind that conclusion instead of
+only a projection.
+
+The query-latency phase (measuring `POST /query` against the fully-loaded
+index) never ran, since the process never reached it — that measurement
+remains genuinely unmeasured pending an architecture change, not just
+unfavorable.
+
 ## Status
 
 **Phase 0 — Project Foundations: complete.**
@@ -806,7 +856,7 @@ Shipped so far (`src/agentic_rag/api/`):
   `/health/ready` against real Qdrant + real Ollama, and again with
   Ollama unreachable; the new `create --factory` entry point via a real
   `uvicorn` process serving real requests.
-- **Load-test corpus generator + runner (Phase 8, code only)** — the real
+- **Load-test corpus generator + runner (Phase 8)** — the real
   10,000-doc × ~50-page target from `docs/REQUIREMENTS.md` §2, not the
   150k theoretical extrapolation above. New
   `src/agentic_rag/loadtest/corpus_generator.py` writes a deterministic,
@@ -843,9 +893,22 @@ Shipped so far (`src/agentic_rag/api/`):
   completed both phases end-to-end, a 20-document run was deliberately
   killed mid-batch and resumed with zero data loss, and (after the fix
   pass) the exact final-batch-crash scenario was reproduced and
-  confirmed recovered. **This PR is code only** — the real ~30-hour,
-  10,000-document run itself is a separate, not-yet-started step (see
-  [`loadtest/README.md`](loadtest/README.md)).
+  confirmed recovered.
+- **Real 10,000-document load test attempted (Phase 8)** — the run itself,
+  not just the code. Stopped at **6,000/10,000 (60%)** after repeatedly
+  hitting a real memory-scaling wall this hardware couldn't sustain past
+  that point — a genuine negative result, not a bug. Full write-up in the
+  new [Real 10,000-Document Load Test — Results](#real-10000-document-load-test--results)
+  section above and [`loadtest/README.md`](loadtest/README.md): per-doc
+  indexing time degraded ~3x partway through with no thermal cause,
+  traced to system RAM exhaustion as the embedded Qdrant HNSW index grew
+  past 6,000 points; the process died once with no error (consistent
+  with a silent OOM kill) and, after two crash-recovery resumes (which
+  worked correctly — no data lost either time), hit the identical wall
+  again within hours each time. Confirms with real data the exact risk
+  the 150k theoretical analysis could only flag as unquantified — at
+  6,000 documents, not 150,000. The query-latency phase never ran, since
+  the process never reached it.
 
 See [`PROJECT_TRACKER.md`](PROJECT_TRACKER.md) for the full phased roadmap,
 per-item status, and links to the exact module each item lives in.

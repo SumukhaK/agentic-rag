@@ -6,7 +6,7 @@ from agentic_rag.loadtest.corpus_generator import (
     _tier_for_index,
     generate_corpus,
 )
-from access_tiers import ACCESS_TIERS, TIER_DIRECTOR, TIER_EMPLOYEE, TIER_MANAGER
+from tests.access_tiers import ACCESS_TIERS, TIER_DIRECTOR, TIER_EMPLOYEE, TIER_MANAGER
 
 
 def test_generate_document_text_length_is_approximately_pages_times_chars_per_page():
@@ -66,10 +66,11 @@ def test_generate_document_text_has_no_duplicate_windows_across_documents():
 
 
 def test_tier_for_index_splits_documents_evenly_across_tiers():
-    tiers = ACCESS_TIERS
     document_count = 9
 
-    assignments = [_tier_for_index(i, document_count, tiers) for i in range(document_count)]
+    assignments = [
+        _tier_for_index(i, document_count, ACCESS_TIERS) for i in range(document_count)
+    ]
 
     assert assignments.count(TIER_EMPLOYEE) == 3
     assert assignments.count(TIER_MANAGER) == 3
@@ -77,14 +78,15 @@ def test_tier_for_index_splits_documents_evenly_across_tiers():
 
 
 def test_tier_for_index_handles_a_count_not_evenly_divisible_by_tier_count():
-    tiers = ACCESS_TIERS
     document_count = 10
 
-    assignments = [_tier_for_index(i, document_count, tiers) for i in range(document_count)]
+    assignments = [
+        _tier_for_index(i, document_count, ACCESS_TIERS) for i in range(document_count)
+    ]
 
     # Every index must land in a real tier - no assignment falls off the
     # end when document_count isn't a multiple of len(tiers).
-    assert all(tier in tiers for tier in assignments)
+    assert all(tier in ACCESS_TIERS for tier in assignments)
     assert len(assignments) == document_count
 
 

@@ -639,7 +639,7 @@ Log of decisions made explicitly during planning, for traceability:
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Access control model | Simple linear tiers (configurable list) | Simplest to implement/reason about; matches the stated example |
+| Access control model | Simple linear tiers (configurable list) | Simplest to implement/reason about; matches §11's ordered-tier example |
 | Keyword search backend | Qdrant native hybrid (sparse+dense) | One database instead of two stateful services |
 | Reranker | Local open-source cross-encoder (`bge-reranker-v2-m3`-class) | Consistent with local-first/open-source generation stack |
 | Fallback message | Single canonical message everywhere | Simpler to test and guarantee consistency of |

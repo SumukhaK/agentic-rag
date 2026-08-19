@@ -6,6 +6,7 @@ from agentic_rag.config import Settings
 from agentic_rag.ingestion.pipeline import IngestionFailure
 from agentic_rag.ingestion.scheduler import SyncCycleResult
 from agentic_rag.ingestion.watcher import FileState
+from agentic_rag.loadtest.corpus_generator import DEFAULT_ACCESS_TIERS
 from agentic_rag.loadtest.runner import (
     _REPRESENTATIVE_QUERIES,
     LoadTestReport,
@@ -16,7 +17,7 @@ from agentic_rag.loadtest.runner import (
     main,
     run_load_test,
 )
-from access_tiers import ACCESS_TIERS, TIER_EMPLOYEE, TIER_MANAGER
+from tests.access_tiers import TIER_EMPLOYEE, TIER_MANAGER
 
 # --- _next_batch --------------------------------------------------------
 
@@ -173,7 +174,7 @@ def test_run_query_latency_phase_validates_against_the_loadtest_access_tiers(
     _run_query_latency_phase(settings=settings, client=object())
 
     for call in mock_answer.call_args_list:
-        assert call.kwargs["known_tiers"] == ACCESS_TIERS
+        assert call.kwargs["known_tiers"] == list(DEFAULT_ACCESS_TIERS)
 
 
 # --- run_load_test --------------------------------------------------------
@@ -342,7 +343,7 @@ def test_run_load_test_always_indexes_against_the_dedicated_loadtest_access_tier
     run_load_test(settings=settings)
 
     cycle_settings = mock_sync_cycle.call_args_list[0].kwargs["settings"]
-    assert cycle_settings.access_tiers == ACCESS_TIERS
+    assert cycle_settings.access_tiers == list(DEFAULT_ACCESS_TIERS)
 
 
 @patch("agentic_rag.loadtest.runner._run_query_latency_phase")

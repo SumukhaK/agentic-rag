@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentic_rag.config import Settings
-from access_tiers import ACCESS_TIERS, TIER_DIRECTOR, TIER_MANAGER
+from tests.access_tiers import ACCESS_TIERS
 
 
 def test_settings_loads_watched_folder_path_from_env(monkeypatch):

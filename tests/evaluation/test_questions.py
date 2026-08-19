@@ -3,7 +3,7 @@ import json
 import pytest
 
 from agentic_rag.evaluation.questions import EvalQuestion, load_questions
-from access_tiers import TIER_EMPLOYEE
+from tests.access_tiers import TIER_EMPLOYEE
 
 
 def _write(path, payload):

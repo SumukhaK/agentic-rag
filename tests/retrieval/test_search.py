@@ -10,11 +10,10 @@ from agentic_rag.ingestion.chunker import Chunk
 from agentic_rag.ingestion.pipeline import IngestedDocument
 from agentic_rag.retrieval.access import UnknownAccessTierError
 from agentic_rag.retrieval.search import hybrid_search
-from access_tiers import ACCESS_TIERS, TIER_EMPLOYEE, TIER_MANAGER
+from tests.access_tiers import ACCESS_TIERS, TIER_EMPLOYEE, TIER_MANAGER
 
 SPARSE_MODEL = "Qdrant/bm25"
 COLLECTION = "documents"
-KNOWN_TIERS = ACCESS_TIERS
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -77,7 +76,7 @@ def _search(client, query, user_tier, top_k=10, known_tiers=None):
         sparse_model=SPARSE_MODEL,
         embedding_cache=EmbeddingCache(),
         user_tier=user_tier,
-        known_tiers=known_tiers or KNOWN_TIERS,
+        known_tiers=known_tiers or ACCESS_TIERS,
         top_k=top_k,
     )
 

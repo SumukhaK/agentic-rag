@@ -10,7 +10,7 @@ from agentic_rag.orchestration.planning import (
     RetrievalOutcome,
 )
 from agentic_rag.retrieval.search import SearchCandidate
-from access_tiers import TIER_EMPLOYEE
+from tests.access_tiers import TIER_EMPLOYEE
 
 KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=60, temperature=0.0)
 

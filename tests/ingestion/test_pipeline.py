@@ -1,8 +1,7 @@
 from agentic_rag.ingestion.pipeline import process_changes
 from agentic_rag.ingestion.watcher import FolderChanges
-from access_tiers import ACCESS_TIERS, TIER_EMPLOYEE, TIER_MANAGER
+from tests.access_tiers import ACCESS_TIERS, TIER_EMPLOYEE, TIER_MANAGER
 
-KNOWN_TIERS = ACCESS_TIERS
 
 
 def test_process_changes_converts_created_and_modified_files(tmp_path):
@@ -15,7 +14,7 @@ def test_process_changes_converts_created_and_modified_files(tmp_path):
     )
 
     documents, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert failures == []
@@ -30,7 +29,7 @@ def test_process_changes_tags_each_document_with_its_access_tier(tmp_path):
     changes = FolderChanges(created=["manager/a.txt"], modified=[], deleted=[])
 
     documents, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert failures == []
@@ -46,7 +45,7 @@ def test_process_changes_isolates_an_untagged_file_without_losing_valid_ones(tmp
     )
 
     documents, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert [doc.relative_path for doc in documents] == ["employee/good.txt"]
@@ -64,7 +63,7 @@ def test_process_changes_isolates_an_unknown_tier_without_losing_valid_ones(tmp_
     )
 
     documents, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert [doc.relative_path for doc in documents] == ["employee/good.txt"]
@@ -85,7 +84,7 @@ def test_process_changes_isolates_a_conversion_failure_without_losing_valid_ones
     )
 
     documents, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert [doc.relative_path for doc in documents] == ["employee/good.txt"]
@@ -101,7 +100,7 @@ def test_process_changes_reports_a_blank_document_as_a_validation_failure(tmp_pa
     changes = FolderChanges(created=["employee/blank.txt"], modified=[], deleted=[])
 
     documents, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert documents == []
@@ -119,7 +118,7 @@ def test_process_changes_prefixes_failure_reason_with_the_exception_type(tmp_pat
     changes = FolderChanges(created=["a.txt"], modified=[], deleted=[])
 
     _, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert failures[0].reason.startswith("UntaggedDocumentError: ")
@@ -131,7 +130,7 @@ def test_process_changes_chunks_each_document(tmp_path):
     changes = FolderChanges(created=["employee/a.txt"], modified=[], deleted=[])
 
     documents, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert failures == []
@@ -148,7 +147,7 @@ def test_process_changes_respects_chunk_size_chars(tmp_path):
     changes = FolderChanges(created=["employee/a.txt"], modified=[], deleted=[])
 
     documents, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=40, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=40, known_tiers=ACCESS_TIERS
     )
 
     assert failures == []
@@ -159,7 +158,7 @@ def test_process_changes_ignores_deleted_files(tmp_path):
     changes = FolderChanges(created=[], modified=[], deleted=["employee/c.txt"])
 
     documents, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert documents == []
@@ -170,7 +169,7 @@ def test_process_changes_returns_empty_lists_for_no_changes(tmp_path):
     changes = FolderChanges(created=[], modified=[], deleted=[])
 
     documents, failures = process_changes(
-        tmp_path, changes, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, changes, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert documents == []

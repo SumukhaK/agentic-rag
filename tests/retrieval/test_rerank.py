@@ -2,7 +2,7 @@ import pytest
 
 from agentic_rag.retrieval.rerank import RerankError, rerank
 from agentic_rag.retrieval.search import SearchCandidate
-from access_tiers import TIER_EMPLOYEE
+from tests.access_tiers import TIER_EMPLOYEE
 
 MODEL = "BAAI/bge-reranker-base"
 

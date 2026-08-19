@@ -24,7 +24,7 @@ from agentic_rag.orchestration.output_security import OutputSecurityCheckResult,
 from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE
 from agentic_rag.orchestration.rewrite import ConversationTurn
 from agentic_rag.retrieval.access import UnknownAccessTierError
-from access_tiers import TIER_EMPLOYEE, TIER_MANAGER
+from tests.access_tiers import TIER_EMPLOYEE, TIER_MANAGER
 
 
 def _test_settings(tmp_path: Path) -> Settings:

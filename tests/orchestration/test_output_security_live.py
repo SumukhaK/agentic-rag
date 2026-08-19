@@ -2,7 +2,7 @@ import pytest
 
 from agentic_rag.generation.llm_client import GenerationError
 from agentic_rag.orchestration.output_security import check_output_security
-from access_tiers import TIER_EMPLOYEE, TIER_MANAGER
+from tests.access_tiers import TIER_EMPLOYEE, TIER_MANAGER
 
 KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=30, temperature=0.0)
 KNOWN_TIERS = [TIER_EMPLOYEE, TIER_MANAGER]

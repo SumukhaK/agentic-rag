@@ -2164,6 +2164,48 @@ building unwired infrastructure to fill the slot.
       payloads, not folder names) - disposable and regenerable in ~35s
       if ever needed again.
 
+      **Self-review** (`/code-review` skill, high effort, 8 parallel
+      finder agents) found 8 real issues, all fixed before merge:
+      - The centralization layer's first implementation added
+        `tests/conftest.py` with a manual `sys.path.insert()`, based on
+        research that concluded `tests/__init__.py` didn't exist. That
+        was wrong - `tests/__init__.py` (and every subdirectory's own)
+        has existed since the repo's first commit, so pytest's default
+        import mode already makes the repo root importable and
+        `from tests.access_tiers import X` (dotted form) works with zero
+        extra code. Personally re-verified (`ls`, `git log`, `find`, a
+        live `pytest` run) before trusting an agent's claim about Python
+        import mechanics, given this exact task had already produced two
+        wrong assumptions about it. Deleted `conftest.py`, converted all
+        21 files to the dotted import form.
+      - Two tests in `tests/loadtest/test_runner.py` asserted
+        `known_tiers`/`access_tiers` against `tests.access_tiers.
+        ACCESS_TIERS` instead of the load test's own independent
+        `DEFAULT_ACCESS_TIERS` - defeating the tests' own documented
+        purpose (proving the load test's tier layout is independent of
+        `Settings.access_tiers`) by coincidence, since both constants
+        happened to hold identical values. Fixed to assert against
+        `DEFAULT_ACCESS_TIERS` directly.
+      - Unused imports left over from the bulk substitution script
+        (`tests/test_config.py`, and `tests/loadtest/test_runner.py`
+        after the fix above) - removed.
+      - `docs/REQUIREMENTS.md` §13 referenced "the stated example" from
+        §11, but the diff had rewritten §11 so that phrase no longer
+        appeared anywhere - reworded to point at §11 directly.
+      - 7 test files defined a redundant `KNOWN_TIERS = ACCESS_TIERS`
+        alias with no purpose - removed, call sites use `ACCESS_TIERS`
+        directly.
+      - `tests/orchestration/test_semantic_cache.py` mixed symbolic
+        constants and literal tier-name strings for the same value in
+        the same call/nearby lines, a partial-substitution artifact -
+        normalized.
+      - `tests/access_tiers.py`'s docstring overclaimed being the "single
+        source of truth," when `config.py` and `corpus_generator.py`
+        independently hold the same values - reworded to name both and
+        explain when a test should import from them directly instead.
+
+      Full suite after the fix pass: 518 passed, 0 failures.
+
 ---
 
 ## Initial Prompt (recorded verbatim)

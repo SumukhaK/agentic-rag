@@ -3,7 +3,7 @@ import pytest
 from agentic_rag.ingestion.chunker import Chunk
 from agentic_rag.ingestion.pipeline import IngestedDocument
 from agentic_rag.ingestion.validation import DocumentValidationError, validate_document
-from access_tiers import TIER_EMPLOYEE
+from tests.access_tiers import TIER_EMPLOYEE
 
 
 def _document(**overrides):

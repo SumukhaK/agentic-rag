@@ -2,9 +2,8 @@ import os
 
 from agentic_rag.ingestion.sync import sync_folder
 from agentic_rag.ingestion.watcher import snapshot
-from access_tiers import ACCESS_TIERS, TIER_EMPLOYEE
+from tests.access_tiers import ACCESS_TIERS, TIER_EMPLOYEE
 
-KNOWN_TIERS = ACCESS_TIERS
 TIER_1_A = os.path.join(TIER_EMPLOYEE, "a.txt")
 TIER_1_GOOD = os.path.join(TIER_EMPLOYEE, "good.txt")
 
@@ -14,7 +13,7 @@ def test_sync_folder_detects_and_converts_a_new_document(tmp_path):
     (tmp_path / TIER_EMPLOYEE / "a.txt").write_text("Arsenal drew 1-1.")
 
     result = sync_folder(
-        tmp_path, previous_snapshot={}, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, previous_snapshot={}, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert [doc.relative_path for doc in result.documents] == [TIER_1_A]
@@ -34,7 +33,7 @@ def test_sync_folder_reports_a_deleted_document(tmp_path):
         tmp_path,
         previous_snapshot=previous,
         chunk_size_chars=2000,
-        known_tiers=KNOWN_TIERS,
+        known_tiers=ACCESS_TIERS,
     )
 
     assert result.deleted == [TIER_1_A]
@@ -54,7 +53,7 @@ def test_sync_folder_reconverts_a_modified_document(tmp_path):
         tmp_path,
         previous_snapshot=previous,
         chunk_size_chars=2000,
-        known_tiers=KNOWN_TIERS,
+        known_tiers=ACCESS_TIERS,
     )
 
     assert [doc.relative_path for doc in result.documents] == [TIER_1_A]
@@ -67,7 +66,7 @@ def test_sync_folder_returns_the_current_snapshot_for_the_next_cycle(tmp_path):
     (tmp_path / TIER_EMPLOYEE / "a.txt").write_text("Arsenal drew 1-1.")
 
     result = sync_folder(
-        tmp_path, previous_snapshot={}, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, previous_snapshot={}, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert result.current_snapshot == snapshot(tmp_path)
@@ -79,7 +78,7 @@ def test_sync_folder_isolates_a_tagging_failure_from_valid_documents(tmp_path):
     (tmp_path / "bad.txt").write_text("no tier folder")
 
     result = sync_folder(
-        tmp_path, previous_snapshot={}, chunk_size_chars=2000, known_tiers=KNOWN_TIERS
+        tmp_path, previous_snapshot={}, chunk_size_chars=2000, known_tiers=ACCESS_TIERS
     )
 
     assert [doc.relative_path for doc in result.documents] == [TIER_1_GOOD]
@@ -95,7 +94,7 @@ def test_sync_folder_reports_nothing_when_folder_is_unchanged(tmp_path):
         tmp_path,
         previous_snapshot=previous,
         chunk_size_chars=2000,
-        known_tiers=KNOWN_TIERS,
+        known_tiers=ACCESS_TIERS,
     )
 
     assert result.documents == []

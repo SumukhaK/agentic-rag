@@ -14,9 +14,8 @@ from agentic_rag.indexing.upsert import _path_filter
 from agentic_rag.ingestion.pipeline import IngestionFailure
 from agentic_rag.ingestion.scheduler import SyncCycleResult, run_sync_cycle, run_sync_loop
 from agentic_rag.ingestion.watcher import FileState, snapshot
-from access_tiers import ACCESS_TIERS, TIER_EMPLOYEE
+from tests.access_tiers import TIER_EMPLOYEE
 
-KNOWN_TIERS = ACCESS_TIERS
 SPARSE_MODEL = "Qdrant/bm25"
 COLLECTION = "documents"
 TIER_1_A = os.path.join(TIER_EMPLOYEE, "a.txt")

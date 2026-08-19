@@ -6,7 +6,7 @@ from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.orchestration.answer import AnswerResult, Citation
 from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE, PlanningResult
 from agentic_rag.orchestration.semantic_cache import SemanticCache, answer_with_cache
-from access_tiers import TIER_EMPLOYEE, TIER_MANAGER
+from tests.access_tiers import TIER_EMPLOYEE, TIER_MANAGER
 
 MODEL = "nomic-embed-text"
 
@@ -25,7 +25,7 @@ def _answer(text: str, citations: list[Citation] | None = None) -> AnswerResult:
     return AnswerResult(text=text, citations=citations or [])
 
 
-_CITATION = Citation(number=1, relative_path="employee/a.txt", chunk_index=0, access_tier=TIER_EMPLOYEE)
+_CITATION = Citation(number=1, relative_path="employee/a.txt", chunk_index=0, access_tier="employee")
 
 
 # --- SemanticCache: get/put primitive -------------------------------------
@@ -90,7 +90,7 @@ def test_get_never_returns_an_entry_cached_under_a_different_user_tier():
     # tier that produced it (FR3) - serving it to a different tier could
     # leak content that tier isn't entitled to, or under-serve one that is.
     cache = SemanticCache()
-    cache.put([1.0, 0.0], TIER_EMPLOYEE, MODEL, _answer("employee's answer."))
+    cache.put([1.0, 0.0], TIER_EMPLOYEE, MODEL, _answer("cached answer."))
 
     result = cache.get([1.0, 0.0], TIER_MANAGER, MODEL, similarity_threshold=0.95, ttl_seconds=300)
 
@@ -311,7 +311,7 @@ def test_answer_with_cache_does_not_cache_across_different_tiers(
 ):
     mock_embed.return_value = [[1.0, 0.0]]
     cache = SemanticCache()
-    cache.put([1.0, 0.0], TIER_EMPLOYEE, MODEL, _answer("employee's cached answer"))
+    cache.put([1.0, 0.0], TIER_EMPLOYEE, MODEL, _answer("cached answer"))
     mock_plan.return_value = _insufficient_result()
     mock_generate.return_value = _answer(CANNOT_ANSWER_MESSAGE)
 

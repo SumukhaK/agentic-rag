@@ -12,7 +12,7 @@ from agentic_rag.observability.request_log import (
     configure_request_logging,
     log_query_request,
 )
-from access_tiers import TIER_EMPLOYEE, TIER_MANAGER
+from tests.access_tiers import TIER_EMPLOYEE, TIER_MANAGER
 
 
 def test_log_query_request_emits_exactly_one_info_record(caplog):

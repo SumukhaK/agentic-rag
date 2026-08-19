@@ -28,7 +28,7 @@ from agentic_rag.ingestion.pipeline import IngestionFailure
 from agentic_rag.ingestion.scheduler import SyncCycleResult
 from agentic_rag.orchestration.answer import AnswerResult, Citation
 from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE
-from access_tiers import TIER_EMPLOYEE
+from tests.access_tiers import TIER_EMPLOYEE
 
 SPARSE_MODEL = "Qdrant/bm25"
 COLLECTION = "eval_documents"

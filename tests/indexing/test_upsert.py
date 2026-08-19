@@ -9,7 +9,7 @@ from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
 from agentic_rag.indexing.upsert import _path_filter, delete_document, index_document
 from agentic_rag.ingestion.chunker import Chunk
 from agentic_rag.ingestion.pipeline import IngestedDocument
-from access_tiers import TIER_EMPLOYEE
+from tests.access_tiers import TIER_EMPLOYEE
 
 SPARSE_MODEL = "Qdrant/bm25"
 COLLECTION = "documents"

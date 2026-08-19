@@ -12,7 +12,7 @@ from agentic_rag.orchestration.planning import (
 from agentic_rag.retrieval.access import UnknownAccessTierError
 from agentic_rag.retrieval.rerank import RerankError
 from agentic_rag.retrieval.search import SearchCandidate
-from access_tiers import TIER_EMPLOYEE, TIER_MANAGER
+from tests.access_tiers import TIER_EMPLOYEE, TIER_MANAGER
 
 KWARGS = dict(
     client=object(),

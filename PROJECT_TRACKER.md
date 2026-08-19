@@ -2819,6 +2819,87 @@ building unwired infrastructure to fill the slot.
         explain when a test should import from them directly instead.
 
       Full suite after the fix pass: 518 passed, 0 failures.
+- [x] Qdrant backup + request correlation ID (own PR,
+      `feat/qdrant-backup-and-request-id`) — the user raised a batch of
+      operability questions (logging granularity, error handling,
+      rollback, "prompt caching," Qdrant backup, API versioning, request
+      logging), each investigated against the real current code before
+      deciding what (if anything) to build. Full discussion recorded in
+      `docs/REQUIREMENTS.md` §15 ("Miscellaneous Discussions") — not
+      duplicated here; this entry covers what was actually implemented.
+
+      **Confirmed already adequate, no change**: per-document error
+      isolation (already solid at 3 stages); the snapshot-revert-and-retry
+      mechanism (a real functional rollback for this architecture, just
+      not transactional); `EmbeddingCache`/`SemanticCache` (real, but not
+      "prompt caching" in the LLM-prefix-cache sense — Ollama doesn't
+      support that, and no code here attempts it).
+
+      **Deliberately deferred**: API versioning (`/v1/` etc.) — one
+      first-party client, no external consumers yet, would be speculative
+      infrastructure ahead of an actual need per `.claude/CLAUDE.md` §1.
+      Per-pipeline-stage failure logging (chunking/tagging/conversion
+      currently have zero logging calls of their own, only surfacing via
+      the aggregate `sync_cycle` log line) — a real, cheap follow-up,
+      flagged but not bundled into this PR.
+
+      **Implemented**:
+      - `indexing/backup.py` (new) — `backup_qdrant_storage()` copies
+        the embedded Qdrant storage directory to a timestamped
+        subdirectory (atomic: copy to a UUID-suffixed `.tmp` dir, then
+        `Path.replace()` into place), then prunes backups beyond
+        `qdrant_backup_retention_count`. Qdrant's own `create_snapshot()`
+        was checked first and confirmed to raise `NotImplementedError`
+        for local/embedded mode directly against the installed
+        `qdrant_client.local.qdrant_local.QdrantLocal` — this project
+        runs embedded mode specifically because Docker isn't available
+        (§5), so a filesystem copy is the only mechanism that actually
+        works here, not a design preference. Scoped deliberately to
+        whole-index loss, not single-document accidental deletion — the
+        watched folder is already the source of truth, so a
+        single-document Qdrant-side deletion self-heals on the next sync
+        cycle for free (see REQUIREMENTS.md §15 for the full reasoning
+        this scoping decision rests on).
+      - `observability/backup_log.py` (new) — `log_qdrant_backup()`/
+        `log_qdrant_backup_error()`, reusing `sync_log.py`'s own
+        `agentic_rag.ingestion.scheduler` logger (already configured at
+        app startup) rather than introducing a second `configure_*_
+        logging()` call for the same logger.
+      - `ingestion/scheduler.py` — `run_sync_loop()` now checks a backup
+        interval once per iteration (`qdrant_backup_interval_seconds`,
+        default 3600s — deliberately independent of `sync_interval_
+        seconds` and of whether a given cycle changed anything, so a
+        fully-quiescent corpus still gets backed up on a wall-clock
+        cadence). A failed backup is logged and the loop continues, the
+        same "an unanticipated failure in one concern must not take down
+        index freshness" reasoning already applied to a whole sync cycle
+        raising.
+      - `config.py` — new `qdrant_backup_path`, `qdrant_backup_interval_
+        seconds` (`gt=0`), `qdrant_backup_retention_count` (`gt=0` — a
+        retention count of 0 would prune every backup immediately after
+        creating it).
+      - `observability/request_log.py` — `log_query_request()` gained a
+        required `request_id` field; `api/routers/query.py` mints a
+        `uuid.uuid4()` once per request, before anything else runs, and
+        threads it through the one existing log call. Server-side only —
+        never accepted from the client, so it can't be spoofed. Kept
+        log-only, not added to `QueryResponse`'s schema — the gap raised
+        was specifically about correlating log lines, not a client-facing
+        contract change, and adding one would have been scope beyond
+        what was asked.
+
+      **Live-verified** (not just mocked): wrote a real point with a real
+      payload to a real embedded Qdrant collection, ran
+      `backup_qdrant_storage()` against it, then pointed a *fresh*
+      `QdrantClient` directly at the backup directory and successfully
+      read the exact point back — confirming the backup is a genuinely
+      restorable copy (this is also the actual documented restore
+      procedure, not a separate mechanism only tested in the abstract).
+
+      26 new tests (9 `indexing/backup.py`, 6 `observability/backup_log.py`,
+      4 scheduler backup-wiring, 4 new `config.py` settings, 2
+      `request_id` in `test_query.py`, 1 `request_id` distinguishing test
+      in `test_request_log.py`). Full suite: 544 passed, 0 failures.
 
 ---
 

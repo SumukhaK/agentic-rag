@@ -99,7 +99,17 @@ class Settings(BaseSettings):
 - `qdrant_storage_path: Path = Path("./data/qdrant")` — the on-disk location where the local, embedded Qdrant vector database stores its data.
 - `qdrant_collection_name: str = "documents"` — the name of the "collection" (similar to a table) inside Qdrant that holds the indexed document chunks.
 
-### Lines 34-37 — Retrieval and reranking settings
+### Lines 34-44 — Qdrant backup settings
+```python
+    qdrant_backup_path: Path = Path("./data/qdrant_backups")
+    qdrant_backup_interval_seconds: float = Field(default=3600.0, gt=0)
+    qdrant_backup_retention_count: int = Field(default=3, gt=0)
+```
+- `qdrant_backup_path: Path = Path("./data/qdrant_backups")` — where periodic copies of the whole `qdrant_storage_path` folder get written (see `indexing/backup.py`). This protects against losing the *entire* search index, not a single document - see that file's own walkthrough for why a single accidentally-deleted document doesn't need this.
+- `qdrant_backup_interval_seconds: float = Field(default=3600.0, gt=0)` — how often (in seconds, default one hour) a backup is taken. This is deliberately a *separate* setting from `sync_interval_seconds` - copying the whole Qdrant storage folder every ~60 seconds (the sync loop's own cadence) would be wasteful, so backups run on their own, much slower clock. `gt=0` (must be greater than zero) exists for the same reason `sync_interval_seconds` has it: a zero-or-negative interval would either mean "never sleep between checks" or behave unpredictably, either of which turns this into a runaway loop hammering the disk.
+- `qdrant_backup_retention_count: int = Field(default=3, gt=0)` — how many of the most recent backups to keep before older ones get automatically deleted (default: the last 3). `gt=0` here specifically rules out a retention count of `0`, which would mean "delete every backup immediately after making it" - a nonsensical setting this system shouldn't silently accept.
+
+### Lines 45-48 — Retrieval and reranking settings
 ```python
     sparse_embedding_model: str = "Qdrant/bm25"
     retrieval_top_k_candidates: int = 10

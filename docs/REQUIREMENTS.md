@@ -656,7 +656,135 @@ Log of decisions made explicitly during planning, for traceability:
 | Evaluation judge model (Phase 8) | Local `qwen2.5:14b-instruct` via Ollama, not Claude | No `ANTHROPIC_API_KEY` is configured for this project (§14's prior open item). The user proposed a local open-weight model "bigger than mistral, not as frontier as Claude" instead. This machine's actual GPU (`nvidia-smi`: GeForce GTX 1650 Ti, 4GB VRAM) rules out anything in the 27B+ class outright - it's the same hardware constraint behind this session's repeated Ollama GPU-OOM incidents with even a 7B model. `qwen2.5:14b-instruct` was pulled and live-verified on this hardware: ~39s cold load (likely partial CPU offload), ~4s warm inference thereafter - acceptable since evaluation runs are offline/batch, not on the live request path the other three judges (`judge_temperature`) sit on. Pinned to its own `evaluation_temperature=0.0`, not reusing `judge_temperature`, for the same reproducibility reasoning `generation_temperature` was already split out from `judge_temperature` for. |
 | Evaluation metric methodology | Retrieval precision & most of hallucination rate measured deterministically against a hand-curated ground-truth question set; only faithfulness (and the unfaithful-answer half of hallucination) goes through the LLM judge | Not everything in "retrieval precision, faithfulness, hallucination rate" needs a judge call. Retrieval precision is checkable directly against ground-truth expected source paths per question. A dedicated subset of questions is deliberately unanswerable from the eval corpus, so whether the system correctly returns the canonical fallback (vs. fabricating an answer) is also a direct check, not a judged one. Faithfulness - whether an answer's claims actually follow from what was cited - is the one dimension that's genuinely a judgment call, so only that (and un-caught fabrication on the "should be unanswerable" set) goes through `qwen2.5:14b-instruct`, reusing `orchestration/judge.py`'s existing `run_judge()`/`classify_verdict()` helpers rather than a fourth bespoke judge implementation. |
 | Real access-tier names | `employee < manager < director` (lowest → highest) | Resolves §14's prior open item. A chain-of-command model, not arbitrary placeholder labels - the ordered-list mechanism itself (§11) is unchanged, only the configured values are. |
+| Qdrant backup mechanism | Periodic filesystem copy of the embedded storage directory (`indexing/backup.py`), not Qdrant's native snapshot API | Qdrant's `create_snapshot()` raises `NotImplementedError` for local/embedded mode - confirmed directly against the installed `qdrant_client.local.qdrant_local.QdrantLocal` - and this project runs embedded mode specifically because Docker isn't available (§5). A plain directory copy, written atomically (temp dir + rename) and rotated to a bounded retention count, is the only mechanism that actually works for this deployment mode. Scoped to whole-index loss (a corrupted on-disk store, a bad shutdown), not single-document recovery - see §15 for why that narrower case doesn't need this. Live-verified: a real point written to a real collection, backed up, then read back correctly by a fresh client pointed at the backup path directly (which is also the actual restore procedure). |
+| API request correlation ID | A UUID4 minted per `POST /query` request, included in its one structured log line | Cheap (a few lines) and closes a real gap: two concurrent requests' log lines were otherwise indistinguishable in a shared stream. Minted server-side, never accepted from the client. |
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 
 None currently open.
+
+## 15. Miscellaneous Discussions
+
+Ad hoc reliability/operability questions the user raised outside the normal
+phase sequence, each investigated against the real current code (not
+assumed) before answering. Recorded here so the reasoning survives, not
+just the resulting checkbox - "we looked into it and decided X because Y"
+is different information than "X is done."
+
+**Guiding principle applied throughout**: match the response to a failure
+mode this project can actually hit (or has already hit), not to what a
+generic "industry-grade" checklist would list. A pattern that's genuinely
+valuable in a multi-tenant production service can be pure overhead for a
+single-instance local-dev system with no external consumers - the question
+asked each time was "does this help *this* system diagnose or recover,"
+not "do mature systems have this."
+
+### Logging granularity: per-cycle vs. per-step
+
+`observability/` has structured JSON logging for `POST /query`, sync
+cycles, evaluation runs, and load-test batches - but `ingestion/chunker.py`,
+`pipeline.py`, `tagger.py`, `validation.py`, and `converter.py` have zero
+logging calls of their own (confirmed by grep, not assumed). A failure in
+any of them is caught in `pipeline.py::process_changes()`'s per-document
+`try/except` and reported as an `IngestionFailure(relative_path, reason)` -
+which surfaces one level up, bundled into the next `sync_cycle` log line's
+`ingestion_failure_paths`, not in real time.
+
+**Assessment**: this is not "silent" - the real path and the real exception
+reason are always captured, within at most one `sync_interval_seconds`
+(default 60s). What's actually missing is *diagnostic granularity*: a
+failure currently says "this document failed at reason X" without saying
+*which pipeline stage* (conversion vs. chunking vs. tagging vs. validation)
+without reading the exception string. One log line per failing *stage*,
+not per successful chunk (which would just be noise at 10,000+ documents),
+would close that gap cheaply. **Not implemented in this pass** - flagged
+as a real, low-cost follow-up, not bundled into the backup/request-ID work
+this discussion otherwise produced.
+
+### Error handling
+
+Confirmed solid on inspection: every document is isolated at three
+separate stages (ingestion in `pipeline.py`, indexing and deletion in
+`scheduler.py::run_sync_cycle()`), each catching `Exception` and recording
+`f"{type(exc).__name__}: {exc}"` plus the exact relative path. One bad file
+can't stall the batch. No changes made here - already met the bar.
+
+### Rollback
+
+Not transactional, because there's no transaction to roll back - the
+system works off a folder-vs-snapshot diff, not a database write.
+`run_sync_cycle()`'s actual mechanism: a failed document's or deletion's
+snapshot entry is reverted to its prior state (or removed if new), so the
+next cycle's diff sees it as still-changed and retries automatically. This
+is a real functional equivalent to a rollback for this architecture, not a
+gap - no change needed.
+
+### "Prompt caching" - two different things, only one exists here
+
+Worth separating explicitly since the term is ambiguous. There is **no
+LLM-level prompt/prefix caching** (the token-cost-saving feature hosted
+APIs like Anthropic/OpenAI offer for repeated system-prompt prefixes) -
+Ollama doesn't support it, and `generation/llm_client.py` doesn't attempt
+it. What **does** exist, serving a related but distinct purpose: an
+`EmbeddingCache` (skips re-embedding identical text) and a `SemanticCache`
+(skips re-running retrieval+generation for a semantically-similar repeat
+question, TTL-bounded, scoped per `user_tier` - see §7). No change made
+here; this section exists to prevent the two being conflated in the future.
+
+### Qdrant backup vs. re-chunking/re-embedding after an accidental deletion
+
+Two different failure modes were initially conflated and needed separating:
+
+1. **Accidentally deleting the wrong document from the index.** Already
+   cheap to recover from, by construction: the watched folder, not Qdrant,
+   is this system's source of truth (§3). `delete_document()` only removes
+   points from the index; the source file on disk is untouched. The next
+   sync cycle sees the file still exists, still doesn't match the index,
+   and re-ingests *that one file* - not the whole corpus - and
+   `EmbeddingCache` may even make it a cache hit if the content is
+   unchanged. A backup-and-restore mechanism would be solving a problem
+   this architecture already solves for free. No change needed for this
+   case specifically.
+2. **Whole-index loss or corruption** (a bad shutdown, a disk issue, the
+   embedded on-disk store getting corrupted). This is a real gap: the only
+   recovery path today is a full rebuild, and this project's own real
+   10,000-document load test (`loadtest/README.md`) never finished a
+   from-scratch rebuild past 6,000 documents on this hardware - "just
+   re-index everything" is a demonstrated-unreliable fallback at this
+   project's own target scale, not a hypothetical worry. **Resolved**: see
+   §13's "Qdrant backup mechanism" row - a periodic filesystem backup of
+   the embedded storage directory, wired into `run_sync_loop()` on its own
+   configurable interval (`qdrant_backup_interval_seconds`, default
+   hourly), independent of `sync_interval_seconds` and of whether a given
+   cycle changed anything. Restore is a documented manual operator
+   procedure, not automatic code: point `qdrant_setup.get_client()` at a
+   chosen backup directory instead of the live storage path (after
+   stopping the app - the running process holds the live path open, so
+   safely swapping it requires the process not to be using it). Automatic
+   corruption-detection-and-restore was considered and deliberately not
+   built - detecting "the index is corrupted enough to warrant restoring
+   from a backup, possibly losing recent changes" without a human aware of
+   the tradeoff is a meaningfully different, riskier feature than taking
+   the backup itself, and nothing in this discussion asked for silent
+   automatic data-loss decisions.
+
+### API versioning
+
+No `/v1/` prefix or contract versioning exists anywhere in `api/`
+(confirmed by grep). **Deliberately not added.** Versioning earns its cost
+when multiple client versions need the old contract to keep working
+simultaneously - e.g. an already-shipped client on an old API shape while
+a new one rolls out. This project has one first-party client, still under
+active development, no external consumers depending on contract stability
+yet. Building versioning infrastructure now would be exactly the
+"speculative infrastructure ahead of an actual need" this project's own
+`.claude/CLAUDE.md` §1 says not to build. Revisit the moment a second real
+client or external consumer exists - not before.
+
+### API request logging
+
+Already solid on inspection (§7's semantic cache write-up and the Phase 7
+log cover the mechanism). One real, cheap gap found and fixed: no
+request/correlation ID, so two concurrent requests' log lines couldn't be
+distinguished or correlated in a shared stream. **Resolved** - see §13's
+"API request correlation ID" row.

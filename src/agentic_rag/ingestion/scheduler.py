@@ -9,11 +9,13 @@ from qdrant_client import QdrantClient
 
 from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache
+from agentic_rag.indexing.backup import backup_qdrant_storage
 from agentic_rag.indexing.upsert import delete_document, index_document
 from agentic_rag.ingestion.pipeline import IngestionFailure
 from agentic_rag.ingestion.snapshot_store import save_snapshot
 from agentic_rag.ingestion.sync import sync_folder
 from agentic_rag.ingestion.watcher import FileState
+from agentic_rag.observability.backup_log import log_qdrant_backup, log_qdrant_backup_error
 from agentic_rag.observability.sync_log import log_sync_cycle, log_sync_cycle_error
 
 
@@ -251,8 +253,24 @@ async def run_sync_loop(
     on a resting no-op cycle, matching this loop's pre-existing
     behavior, to avoid one log line every `sync_interval_seconds`
     forever), or `log_sync_cycle_error()` when the whole cycle raised.
+
+    **A filesystem backup of Qdrant's on-disk storage runs on its own
+    wall-clock cadence** (`settings.qdrant_backup_interval_seconds`,
+    checked once per loop iteration, independent of `sync_interval_seconds`
+    and of whether this iteration's cycle changed anything), not tied to
+    cycle success/failure. This exists to bound *whole-index* loss - see
+    `indexing/backup.py::backup_qdrant_storage()`'s own docstring for why
+    Qdrant's native snapshot API isn't used (it doesn't support
+    local/embedded mode) and why this matters at this project's target
+    scale specifically (the real 10,000-document load test never finished
+    a from-scratch rebuild on this hardware - see `loadtest/README.md`).
+    A failed backup is logged (`log_qdrant_backup_error()`) and the loop
+    continues rather than raising - the same "an unanticipated failure in
+    one concern must not take down index freshness, the loop's actual
+    job" reasoning already applied to a whole cycle raising, above.
     """
     snapshot = initial_snapshot if initial_snapshot is not None else {}
+    last_backup_time = time.monotonic()
     while True:
         stop_event = threading.Event()
         cycle_start = time.monotonic()
@@ -303,4 +321,26 @@ async def run_sync_loop(
                     ],
                     duration_seconds=time.monotonic() - cycle_start,
                 )
+
+        if time.monotonic() - last_backup_time >= settings.qdrant_backup_interval_seconds:
+            backup_start = time.monotonic()
+            try:
+                backup_path = await asyncio.to_thread(
+                    backup_qdrant_storage,
+                    settings.qdrant_storage_path,
+                    settings.qdrant_backup_path,
+                    retention_count=settings.qdrant_backup_retention_count,
+                )
+            except Exception as exc:  # noqa: BLE001 - a failed backup must not stall index freshness
+                log_qdrant_backup_error(
+                    error=f"{type(exc).__name__}: {exc}",
+                    duration_seconds=time.monotonic() - backup_start,
+                )
+            else:
+                log_qdrant_backup(
+                    backup_path=str(backup_path),
+                    duration_seconds=time.monotonic() - backup_start,
+                )
+            last_backup_time = time.monotonic()
+
         await asyncio.sleep(settings.sync_interval_seconds)

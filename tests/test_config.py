@@ -175,6 +175,51 @@ def test_settings_qdrant_settings_overridable_from_env(monkeypatch):
     assert settings.qdrant_collection_name == "football_docs"
 
 
+def test_settings_defaults_qdrant_backup_settings(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    for key in (
+        "QDRANT_BACKUP_PATH",
+        "QDRANT_BACKUP_INTERVAL_SECONDS",
+        "QDRANT_BACKUP_RETENTION_COUNT",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = Settings()
+
+    assert settings.qdrant_backup_path == Path("./data/qdrant_backups")
+    assert settings.qdrant_backup_interval_seconds == 3600.0
+    assert settings.qdrant_backup_retention_count == 3
+
+
+def test_settings_qdrant_backup_settings_overridable_from_env(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("QDRANT_BACKUP_PATH", "/data/backups")
+    monkeypatch.setenv("QDRANT_BACKUP_INTERVAL_SECONDS", "1800")
+    monkeypatch.setenv("QDRANT_BACKUP_RETENTION_COUNT", "5")
+
+    settings = Settings()
+
+    assert settings.qdrant_backup_path == Path("/data/backups")
+    assert settings.qdrant_backup_interval_seconds == 1800.0
+    assert settings.qdrant_backup_retention_count == 5
+
+
+def test_settings_rejects_a_zero_qdrant_backup_interval_seconds(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("QDRANT_BACKUP_INTERVAL_SECONDS", "0")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_settings_rejects_a_zero_qdrant_backup_retention_count(monkeypatch):
+    monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
+    monkeypatch.setenv("QDRANT_BACKUP_RETENTION_COUNT", "0")
+
+    with pytest.raises(ValidationError):
+        Settings()
+
+
 def test_settings_defaults_sparse_embedding_model(monkeypatch):
     monkeypatch.setenv("WATCHED_FOLDER_PATH", "/tmp/corpus")
     monkeypatch.delenv("SPARSE_EMBEDDING_MODEL", raising=False)

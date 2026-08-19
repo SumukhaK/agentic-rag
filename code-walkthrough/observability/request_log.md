@@ -76,10 +76,11 @@ def _truncate(text: str | None) -> str | None:
 - `if text is None or len(text) <= _MAX_LOGGED_TEXT_LENGTH: return text` — if there's no text to truncate, or it's already within the limit, it's returned completely unchanged.
 - `return text[:_MAX_LOGGED_TEXT_LENGTH] + f"...[truncated, {len(text)} chars total]"` — otherwise, the text is cut down to the first 2000 characters, and a marker is appended showing it was truncated along with the *original* full length — so a reader of the log can tell both that truncation happened and how much text they're not seeing, rather than a truncated string silently looking complete.
 
-### Lines 45-55 — `log_query_request()` signature
+### Lines 45-56 — `log_query_request()` signature
 ```python
 def log_query_request(
     *,
+    request_id: str,
     user_tier: str,
     query: str,
     rewritten_query: str | None,
@@ -91,6 +92,7 @@ def log_query_request(
 ) -> None:
 ```
 - All parameters are keyword-only, forcing call sites to name each one explicitly.
+- `request_id: str` — a unique identifier for this one request (a UUID, generated fresh in `api/routers/query.py` before anything else runs and passed straight through). See the dedicated docstring section below for why this exists.
 - `user_tier: str` — which tier/plan the requesting user belongs to (used elsewhere in the app to control things like rate limits); recorded here so usage patterns can be broken down by tier.
 - `query: str` — the user's original question text, as submitted.
 - `rewritten_query: str | None` — the query after being rewritten/reformulated (e.g. to incorporate conversation history), or `None` if that step never ran (explained below).
@@ -113,7 +115,21 @@ def log_query_request(
 ```
 - Explains a deliberate structural choice: rather than logging progress incrementally as a request moves through each processing step (which, under concurrent load with many requests being handled in parallel, would produce many interleaved lines from different requests that a reader would have to painstakingly untangle), this function is called exactly once, after the entire request's outcome is already known. That guarantees each log line is self-contained and tells the complete story of one request by itself.
 
-### Lines 65-69 — Docstring: why `rewritten_query` can be `None`
+### Lines 66-73 — Docstring: why `request_id` exists
+```python
+    `request_id` (a UUID minted once per request in `api/routers/query.py`,
+    not derived from anything in `payload`) exists specifically for that
+    "concurrent load" case: two requests with identical `query`/`user_tier`
+    arriving close together produce log lines a reader can't otherwise tell
+    apart, and nothing in this line's other fields lets a reader correlate
+    it with, say, a downstream error logged elsewhere for the same request.
+    Minted server-side, not accepted from the client, so it can't be
+    spoofed or reused across requests by a caller.
+```
+- Explains what problem `request_id` actually solves: the paragraph just above already established that logging once per request (not incrementally) avoids interleaved partial lines, but that alone still doesn't solve *this* problem — two genuinely different requests can have identical `user_tier`/`query` values (the same person asking the same question twice, or two different people asking the same thing at once), so without something unique per request, a reader still can't tell two such log lines apart or know for certain which is which if they need to cross-reference against, say, an error logged somewhere else for one specific request.
+- The ID is generated with Python's `uuid` module on the server side, inside `api/routers/query.py`, before any other work happens for that request — it's never something a client sends in and the server merely echoes back. That matters for trustworthiness: a client-supplied ID could be reused across multiple different requests (defeating the whole point) or deliberately collided with another request's ID.
+
+### Lines 74-78 — Docstring: why `rewritten_query` can be `None`
 ```python
     `rewritten_query` is `None`, not the raw `query` duplicated, for a
     request refused by input screening (`_screen_input()` in
@@ -153,11 +169,12 @@ def log_query_request(
 ```
 - A final note tying the function back to the `_truncate()` helper and the `_MAX_LOGGED_TEXT_LENGTH` constant defined earlier, confirming both text fields go through truncation before being logged.
 
-### Lines 88-99 — Building the payload dictionary
+### Lines 88-100 — Building the payload dictionary
 ```python
     payload = {
         "event": "query_request",
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "request_id": request_id,
         "user_tier": user_tier,
         "query": _truncate(query),
         "rewritten_query": _truncate(rewritten_query),
@@ -171,6 +188,7 @@ def log_query_request(
 - `payload = {...}` — assembles the dictionary that will become the JSON log line.
 - `"event": "query_request"` — a fixed tag identifying this specific kind of log event, distinguishing it from other event types (like `evaluation_run` or `sync_cycle`) that might appear in a combined log stream.
 - `"timestamp": datetime.now(timezone.utc).isoformat()` — the current time in UTC, in ISO-8601 string form, matching the convention used across all the other `*_log.py` modules for consistent, timezone-unambiguous sorting/comparison.
+- `"request_id": request_id` — copied straight through from the parameter with no transformation; see the dedicated docstring section above for what this is for.
 - `"query": _truncate(query)` and `"rewritten_query": _truncate(rewritten_query)` — both text fields are passed through the truncation helper before being stored, applying the length cap discussed earlier.
 - The rest of the keys (`user_tier`, `history_turns`, `verdict`, `retrieval_hit_count`, `cited_paths`, `timings_seconds`) are copied directly from the function's parameters without transformation.
 

@@ -4,9 +4,10 @@
 
 ## Line-by-line walkthrough
 
-### Lines 1-37 — Imports and router setup
+### Lines 1-38 — Imports and router setup
 ```python
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 
@@ -45,6 +46,7 @@ from agentic_rag.retrieval.access import UnknownAccessTierError
 router = APIRouter()
 ```
 - `import time` — imports Python's `time` module, used via `time.monotonic()` to measure how long each phase of handling a request takes, for logging.
+- `import uuid` — imports Python's UUID-generation module, used to mint a unique `request_id` for every incoming request so its log line can be told apart from any other request's.
 - `from concurrent.futures import ThreadPoolExecutor` — imports a tool for running a small, fixed number of tasks concurrently on separate threads, used here to run the injection check and the foul-language check at the same time instead of one after another.
 - `from dataclasses import asdict` — imports a helper that converts a Python "dataclass" instance (a simple class for holding data) into a plain dictionary, used later to convert internal citation objects into the API's `CitationModel` schema.
 - `from fastapi import APIRouter, Depends, HTTPException` — imports `APIRouter` (to define this file's routes), `Depends` (dependency injection), and `HTTPException` (used to deliberately return a specific HTTP error status, like 422, with a custom message).
@@ -157,8 +159,9 @@ def query(
   - It explains `check_output_security()` is skipped entirely whenever the answer text is exactly the canonical fallback message: `generate_answer()` never attaches real citations to that fallback, so there's nothing meaningful to tier-check, and the fallback text itself is a fixed, already-known-safe string that can't possibly "reflect a successful injection" — so calling the security judge on it would just waste an LLM round-trip for no benefit.
   - It explains the observability behavior: exactly one structured JSON log line is emitted per request (via `log_query_request` from `observability/request_log.py`), with each phase's duration measured using `time.monotonic()`. This happens *even for a request that raises an exception* — the entire body of the function runs inside one `try` block, and any exception other than `UnknownAccessTierError` (most plausibly a `GenerationError` from Ollama being unreachable or timing out) is logged with the `VERDICT_ERROR` verdict, along with whatever partial timing/outcome data had already been computed before the failure, and then the exception is re-raised — deliberately, so that the exact scenario this logging exists to help diagnose (an Ollama outage) is never the one scenario that goes unlogged. The one genuine exception to "always log something" is `UnknownAccessTierError` itself, which represents a client input-validation failure (a 422) that happens before there's any real pipeline outcome to log, and doesn't correspond to any of the fixed `VERDICT_*` vocabulary anyway.
 
-### Lines 168-173 — Setting up per-request tracking state
+### Lines 169-175 — Setting up per-request tracking state
 ```python
+    request_id = str(uuid.uuid4())
     request_start = time.monotonic()
     history_turns = len(payload.history)
     timings: dict[str, float] = {}
@@ -166,6 +169,7 @@ def query(
     retrieval_hit_count = 0
     cited_paths: list[str] = []
 ```
+- `request_id = str(uuid.uuid4())` — the very first thing this function does, before any real work happens: mints a fresh, random UUID and converts it to its standard string form (e.g. `"3fa85f64-5717-4562-b3fc-2c963f66afa6"`). Generated once per request and reused for the entire life of this one call - this is what lets a reader tell two requests' log lines apart, even if everything else about them (query text, user tier) happens to be identical.
 - `request_start = time.monotonic()` — records the moment this request started being processed, used as the baseline for the total-duration measurement (`time.monotonic()` is used instead of wall-clock time because it can't jump backward or be affected by system clock changes, making duration measurements reliable).
 - `history_turns = len(payload.history)` — captures how many prior conversation turns were sent, for inclusion in the log line.
 - `timings: dict[str, float] = {}` — starts an empty dictionary that will accumulate how long each phase of processing took, filled in as the function progresses.
@@ -173,11 +177,12 @@ def query(
 - `retrieval_hit_count = 0` — starts at zero; will be updated to reflect how many source citations were actually found, if processing gets that far.
 - `cited_paths: list[str] = []` — starts empty; will be filled with the relative paths of any cited documents, for the log line.
 
-### Lines 175-186 — The inner `_log` helper
+### Lines 177-188 — The inner `_log` helper
 ```python
     def _log(verdict: str) -> None:
         timings["total"] = time.monotonic() - request_start
         log_query_request(
+            request_id=request_id,
             user_tier=payload.user_tier,
             query=payload.query,
             rewritten_query=rewritten_query,
@@ -190,7 +195,7 @@ def query(
 ```
 - `def _log(verdict: str) -> None:` — defines a small closure (a function defined inside another function, which can read and use the outer function's local variables directly) that captures the current values of all the tracking variables set up above and writes one structured log line. Defining it as a closure means every one of the several places in the function below that needs to log a final outcome can just call `_log(some_verdict)` without repeating all this bookkeeping each time.
 - `timings["total"] = time.monotonic() - request_start` — computes and records the total elapsed time for the whole request, right before logging.
-- `log_query_request(...)` — calls the actual logging function (from `observability/request_log.py`), passing along the user's tier, their original query, the rewritten query (or `None` if rewriting never happened), how many history turns were involved, the specific outcome verdict, how many results were retrieved, which document paths were cited, and the full per-phase timing breakdown.
+- `log_query_request(...)` — calls the actual logging function (from `observability/request_log.py`), passing along this request's unique ID, the user's tier, their original query, the rewritten query (or `None` if rewriting never happened), how many history turns were involved, the specific outcome verdict, how many results were retrieved, which document paths were cited, and the full per-phase timing breakdown.
 
 ### Lines 188-195 — Screening the input
 ```python

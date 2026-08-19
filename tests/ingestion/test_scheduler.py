@@ -730,3 +730,130 @@ def test_run_sync_loop_waits_for_the_in_flight_cycle_before_propagating_cancella
             assert cycle_finished.is_set()
 
     asyncio.run(_run())
+
+
+# --- run_sync_loop: Qdrant storage backup ----------------------------------
+
+
+@patch("agentic_rag.ingestion.scheduler.time.monotonic", side_effect=itertools.count(0, 1))
+@patch("agentic_rag.ingestion.scheduler.backup_qdrant_storage")
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
+@patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
+@patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
+def test_run_sync_loop_backs_up_once_the_backup_interval_elapses(
+    mock_run_cycle, mock_sleep, mock_save_snapshot, mock_backup, mock_monotonic, tmp_path
+):
+    mock_run_cycle.side_effect = [(_empty_result(), {})]
+    mock_sleep.side_effect = [asyncio.CancelledError()]
+    mock_backup.return_value = tmp_path / "qdrant_backups" / "20260101T000000Z"
+    settings = _loop_settings(tmp_path).model_copy(
+        update={"qdrant_backup_interval_seconds": 2.0}
+    )
+
+    async def _run():
+        with pytest.raises(asyncio.CancelledError):
+            await run_sync_loop(settings=settings, client=object())
+
+    asyncio.run(_run())
+
+    mock_backup.assert_called_once_with(
+        settings.qdrant_storage_path,
+        settings.qdrant_backup_path,
+        retention_count=settings.qdrant_backup_retention_count,
+    )
+
+
+@patch("agentic_rag.ingestion.scheduler.backup_qdrant_storage")
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
+@patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
+@patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
+def test_run_sync_loop_does_not_back_up_before_the_interval_elapses(
+    mock_run_cycle, mock_sleep, mock_save_snapshot, mock_backup, tmp_path
+):
+    # Default qdrant_backup_interval_seconds is 3600 - a fast test run
+    # (real elapsed time: milliseconds) must never trigger a backup.
+    mock_run_cycle.side_effect = [(_empty_result(), {})]
+    mock_sleep.side_effect = [asyncio.CancelledError()]
+    settings = _loop_settings(tmp_path)
+
+    async def _run():
+        with pytest.raises(asyncio.CancelledError):
+            await run_sync_loop(settings=settings, client=object())
+
+    asyncio.run(_run())
+
+    mock_backup.assert_not_called()
+
+
+@patch("agentic_rag.ingestion.scheduler.time.monotonic", side_effect=itertools.count(0, 1))
+@patch("agentic_rag.ingestion.scheduler.log_qdrant_backup")
+@patch("agentic_rag.ingestion.scheduler.backup_qdrant_storage")
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
+@patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
+@patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
+def test_run_sync_loop_logs_a_successful_backup(
+    mock_run_cycle,
+    mock_sleep,
+    mock_save_snapshot,
+    mock_backup,
+    mock_log_backup,
+    mock_monotonic,
+    tmp_path,
+):
+    mock_run_cycle.side_effect = [(_empty_result(), {})]
+    mock_sleep.side_effect = [asyncio.CancelledError()]
+    backup_path = tmp_path / "qdrant_backups" / "20260101T000000Z"
+    mock_backup.return_value = backup_path
+    settings = _loop_settings(tmp_path).model_copy(
+        update={"qdrant_backup_interval_seconds": 2.0}
+    )
+
+    async def _run():
+        with pytest.raises(asyncio.CancelledError):
+            await run_sync_loop(settings=settings, client=object())
+
+    asyncio.run(_run())
+
+    mock_log_backup.assert_called_once()
+    kwargs = mock_log_backup.call_args.kwargs
+    assert kwargs["backup_path"] == str(backup_path)
+    assert kwargs["duration_seconds"] >= 0.0
+
+
+@patch("agentic_rag.ingestion.scheduler.time.monotonic", side_effect=itertools.count(0, 1))
+@patch("agentic_rag.ingestion.scheduler.log_qdrant_backup_error")
+@patch("agentic_rag.ingestion.scheduler.backup_qdrant_storage")
+@patch("agentic_rag.ingestion.scheduler.save_snapshot")
+@patch("agentic_rag.ingestion.scheduler.asyncio.sleep")
+@patch("agentic_rag.ingestion.scheduler.run_sync_cycle")
+def test_run_sync_loop_continues_after_a_backup_raises(
+    mock_run_cycle,
+    mock_sleep,
+    mock_save_snapshot,
+    mock_backup,
+    mock_log_backup_error,
+    mock_monotonic,
+    tmp_path,
+):
+    # A failed backup - e.g. disk full, a transient filesystem error -
+    # must not take down index freshness, the loop's actual job. Two
+    # iterations prove the loop genuinely continues past the failure,
+    # not just that the exception happened to be swallowed once.
+    mock_run_cycle.side_effect = [(_empty_result(), {}), (_empty_result(), {})]
+    mock_sleep.side_effect = [None, asyncio.CancelledError()]
+    mock_backup.side_effect = OSError("disk full")
+    settings = _loop_settings(tmp_path).model_copy(
+        update={"qdrant_backup_interval_seconds": 2.0}
+    )
+
+    async def _run():
+        with pytest.raises(asyncio.CancelledError):
+            await run_sync_loop(settings=settings, client=object())
+
+    asyncio.run(_run())
+
+    assert mock_run_cycle.call_count == 2
+    mock_log_backup_error.assert_called()
+    kwargs = mock_log_backup_error.call_args.kwargs
+    assert kwargs["error"] == "OSError: disk full"
+    assert kwargs["duration_seconds"] >= 0.0

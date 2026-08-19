@@ -44,6 +44,7 @@ def _truncate(text: str | None) -> str | None:
 
 def log_query_request(
     *,
+    request_id: str,
     user_tier: str,
     query: str,
     rewritten_query: str | None,
@@ -61,6 +62,15 @@ def log_query_request(
     tells the whole story of one request rather than requiring a reader
     to reconstruct it from several interleaved lines under concurrent
     load.
+
+    `request_id` (a UUID minted once per request in `api/routers/query.py`,
+    not derived from anything in `payload`) exists specifically for that
+    "concurrent load" case: two requests with identical `query`/`user_tier`
+    arriving close together produce log lines a reader can't otherwise tell
+    apart, and nothing in this line's other fields lets a reader correlate
+    it with, say, a downstream error logged elsewhere for the same request.
+    Minted server-side, not accepted from the client, so it can't be
+    spoofed or reused across requests by a caller.
 
     `rewritten_query` is `None`, not the raw `query` duplicated, for a
     request refused by input screening (`_screen_input()` in
@@ -88,6 +98,7 @@ def log_query_request(
     payload = {
         "event": "query_request",
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "request_id": request_id,
         "user_tier": user_tier,
         "query": _truncate(query),
         "rewritten_query": _truncate(rewritten_query),

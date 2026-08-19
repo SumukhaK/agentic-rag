@@ -1697,12 +1697,14 @@ building unwired infrastructure to fill the slot.
       produces exactly one valid JSON line with an embedded traceback
       for a real exception. Full suite after fixes: 463 passed, 0
       failures.
-- [~] Load test at target scale (10,000 docs × ~50 pages) — code to
-      actually run it now exists (own PR below,
-      `feat/loadtest-corpus-and-runner`); the real multi-hour run itself
-      has not been executed yet. A separate, explicitly theoretical
-      exercise was done
-      instead, at the user's request, own PR
+- [x] Load test at target scale (10,000 docs × ~50 pages) — attempted for
+      real (own PR below, `feat/loadtest-corpus-and-runner`, plus the
+      run itself, documented at the end of this entry). **Result: stopped
+      at 6,000/10,000 (60%) after repeatedly hitting a real memory-scaling
+      wall this hardware couldn't sustain past that point** - a genuine
+      negative result, not a bug; see the full write-up below and
+      [`loadtest/README.md`](../loadtest/README.md). A separate, explicitly
+      theoretical exercise was done first, at the user's request, own PR
       `docs/scaling-to-150k-analysis`: [README.md's "Scaling to 150,000
       Documents"](../README.md) works out what would break and what
       would need to change to run this architecture at 15× the real
@@ -1888,6 +1890,59 @@ building unwired infrastructure to fill the slot.
       the true-cumulative-total reporting, and the fresh-cache-per-query
       property). Full suite after fixes: 518 passed, 0 failures.
       Re-verified live against real Ollama + real embedded Qdrant.
+
+      **The real run**: started 2026-08-16, worked on through 2026-08-19
+      on this project's own dev machine (GTX 1650 Ti, 4GB VRAM, 16GB RAM).
+      **Stopped at 6,000/10,000 documents (60%)** - not a code bug, a
+      real, reproducible hardware limit the run itself surfaced. Full
+      write-up in [`loadtest/README.md`](../loadtest/README.md) and
+      README.md's new "Real 10,000-Document Load Test — Results" section;
+      summary here:
+
+      Per-document indexing time held roughly steady (≈17.5s/doc,
+      batches 0-23, 4,800 docs) then stepped ~3x slower (≈52.2s/doc,
+      batches 24-29, 1,200 docs) with no gradual ramp between the two
+      regimes. `nvidia-smi` ruled out GPU thermal throttling (60-62°C,
+      idle between calls) as the cause. The real cause: system RAM
+      exhaustion - free memory (16GB total) was repeatedly observed down
+      to ~1GB free, with the load-test process's own resident memory
+      climbing past 6.6GB and still growing as the embedded Qdrant
+      collection's HNSW index grew. This is the exact risk the 150k
+      theoretical analysis above could only flag as unquantified ("HNSW
+      insert cost is known to grow with graph size... neither effect is
+      quantified here") - now confirmed with real data, and at 6,000
+      documents, well short of even this project's own real target, not
+      just in the 150k hypothetical.
+
+      The process died once with no error, no traceback, and no recorded
+      machine reboot - consistent with a silent OS-level OOM kill.
+      Resumed twice via `python -m agentic_rag.loadtest.runner`; the
+      crash-recovery design worked correctly both times (stranded
+      batches picked up automatically, zero data lost, matching the
+      earlier live-verification of this exact mechanism) - but each
+      resumed process hit the identical memory wall again within a few
+      hours and made zero further logged progress before being stopped.
+      Measured chunk count (476,439 / 6,000 = 79.4/doc) and Qdrant
+      storage (5.5GB / 6,000 ≈ 0.94MB/doc) both closely matched the 150k
+      analysis's own 10-document calibration (79/doc, 0.93MB/doc) -
+      confirming the per-document numbers themselves are sound; the
+      failure mode is specifically about memory growth *sustained* over
+      a real multi-thousand-document run, which no small calibration
+      sample could have shown. Only 1 document failed indexing out of
+      6,000 (`tier-1/doc_02197.md`, isolated).
+
+      The query-latency phase never ran, since `run_load_test()` never
+      reached it - that measurement remains genuinely unmeasured, not
+      unfavorable. **What would actually fix this**, unchanged from the
+      150k analysis's own conclusion: moving off embedded/in-memory
+      Qdrant (a real server with on-disk vector storage, or sharding)
+      before attempting this scale again - an architectural decision
+      requiring its own ADR, not a load-test script change, and not
+      attempted here since it was explicitly out of this PR's scope.
+      Stopped deliberately rather than continuing an indefinite
+      restart-and-fail cycle - 60% with a clear, repeated, measured cause
+      is a more informative, honest result than an open-ended series of
+      manual interventions chasing a hardware limit no restart fixes.
 - [x] Deployment hardening (containerization, health checks) — own PR,
       `feat/deployment-hardening`. Scoped with the user via
       `AskUserQuestion` before writing anything (`docs/REQUIREMENTS.md`

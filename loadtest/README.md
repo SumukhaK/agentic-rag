@@ -107,7 +107,99 @@ The load test is designed to lose at most one batch's worth of progress
 Every run writes a fresh, timestamped
 `loadtest/results/loadtest-<timestamp>.json` (gitignored - run output, not
 a fixture) with the ingestion totals, per-batch timing, and the
-query-latency phase's measurements. **No real 10,000-document run has been
-completed yet** - this section will be updated with real numbers, and
-compared against the 150k theoretical analysis's predictions, once one
-has.
+query-latency phase's measurements - but only if `run_load_test()` returns
+normally. The one real run attempted so far never reached that point (see
+below), so this section is a manual write-up from the structured batch
+logs and direct on-disk inspection, not a report file.
+
+### What was attempted
+
+A real run against the full `docs/REQUIREMENTS.md` §2 target - 10,000
+documents, ~50 pages each, the default `loadtest_batch_size=200` - was
+started on 2026-08-16 and worked on, on and off, through 2026-08-19, on
+this project's own development machine (GTX 1650 Ti, 4GB VRAM, 16GB
+system RAM). **It did not complete.** It was stopped at **6,000 / 10,000
+documents (60%)** after repeatedly hitting a real memory-scaling wall this
+hardware could not sustain past that point - not a code bug, and not
+something a restart could fix, since it recurred after every restart
+within a few hours.
+
+### Measured results (0 - 6,000 documents)
+
+| Metric | Measured value |
+|---|---|
+| Documents indexed | 6,000 / 10,000 (60%) |
+| Total chunks indexed | 476,439 (79.4/doc - matches the 150k analysis's own 79/doc calibration almost exactly) |
+| Qdrant storage | 5.5 GB (≈0.94 MB/doc - close to the 150k analysis's 0.93 MB/doc calibration) |
+| Indexing failures | 1 (`tier-1/doc_02197.md`, isolated - 5,999/6,000 succeeded cleanly) |
+| Total logged indexing time (sum of completed batches) | ≈146,613s (≈40.7 hours) |
+| Total real wall-clock time (first launch to final stop) | ≈72.7 hours (≈3.0 days) - the gap between this and the row above is the two multi-hour unexplained stalls/crashes below, not active work |
+
+### The rate degraded by ~3x partway through, then the process started dying
+
+Per-batch timing split cleanly into two regimes, with no gradual ramp
+between them:
+
+| Phase | Batches | Docs | Avg time/batch | Avg time/doc |
+|---|---|---|---|---|
+| "Healthy" (0-23) | 24 | 4,800 | ≈58.3 min | ≈17.5s |
+| "Degraded" (24-29) | 6 | 1,200 | ≈174.1 min (**≈3.0x slower**) | ≈52.2s |
+
+The healthy-phase per-document rate (≈17.5s) already ran somewhat slower
+than the 150k analysis's own 10-document calibration (≈10.6s/doc) - a real
+hardware/timing variance the small calibration sample couldn't have
+caught. The degraded phase is the more important finding: `nvidia-smi`
+showed no thermal throttling (60-62°C, GPU idle between calls, low VRAM
+use) when checked during the slow batches, ruling out a GPU heat problem.
+What was actually happening: **system RAM was being exhausted.** Free
+system memory (16GB total) was repeatedly observed down to
+**~1GB free**, with the load-test process's own working set climbing past
+6.6GB and still growing. This matches, and empirically confirms, exactly
+what the 150k theoretical analysis flagged as an unquantified risk
+("HNSW insert cost is known to grow with graph size... neither effect is
+quantified here") - except it showed up at **6,000 documents**, well
+short of even this project's own real 10,000-document target, not just in
+a 15x-larger hypothetical scenario.
+
+### The process required three restarts, and never fully recovered
+
+- After batch 29 (6,000 docs), the process died with **no error, no
+  traceback, and no recorded machine reboot** - consistent with a silent
+  OS-level OOM kill under the RAM pressure above.
+- Resumed via `python -m agentic_rag.loadtest.runner` (the crash-recovery
+  design worked exactly as built and tested: the stranded batch was picked
+  up automatically, no data lost) - but the new process hit the same wall
+  and produced **zero further progress across the next several hours**,
+  with system RAM back down to ~1GB free and command-level system
+  operations (even a plain `ls`) visibly slowed by the resulting paging.
+- Killed and resumed a second time; the same pattern recurred within
+  hours.
+- At that point the run was stopped deliberately rather than continuing
+  to fight the same wall - 60% of the real target, with a clear, repeated,
+  measured cause, is a more informative result than an indefinite series
+  of manual restarts chasing a hardware limit no restart can fix.
+
+### What this means
+
+**This is a real, negative result, not a failed measurement.** The 150k
+theoretical analysis (above) predicted this project's current
+architecture - a single process, embedded/local Qdrant holding its whole
+HNSW graph resident in memory, no sharding or on-disk vector storage -
+would not scale gracefully; this run demonstrates that limit is reached
+well before even the real 10,000-document target on hardware in this
+project's own class (4GB VRAM, 16GB RAM). Extrapolating the *degraded*
+rate (≈52.2s/doc) for the remaining 4,000 documents gives ≈58 more hours
+of indexing alone - and that estimate is almost certainly optimistic,
+since it assumes the process could run that whole stretch without another
+OOM-driven stall, which it demonstrably could not do even once already.
+
+The query-latency phase (measuring `POST /query` latency against the
+fully-loaded index) never ran, since `run_load_test()` never reached it -
+that measurement remains genuinely unmeasured, not just unfavorable.
+
+**What would actually fix this**, per the 150k analysis's own "where the
+current architecture breaks down" section: moving off embedded/in-memory
+Qdrant (a real Qdrant server with on-disk vector storage, or sharding)
+before attempting this scale again - not a load-test script change. That
+remains its own architectural decision, requiring its own ADR, not
+something to retry as-is expecting a different outcome.

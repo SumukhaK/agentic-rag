@@ -210,9 +210,9 @@ Shipped (`src/agentic_rag/orchestration/`):
 - Composed into `POST /query` in Phase 7 (below) — see that section for
   how.
 
-**Phase 7 — API & Delivery: in progress.**
+**Phase 7 — API & Delivery: complete.**
 
-Shipped so far (`src/agentic_rag/api/`):
+Shipped (`src/agentic_rag/api/`):
 - **FastAPI app scaffold** — `create_app(settings)` takes `Settings`
   explicitly rather than constructing one internally, so tests can point
   the app at an ephemeral `tmp_path` Qdrant/corpus instead of `.env`.

@@ -1658,10 +1658,41 @@ building unwired infrastructure to fill the slot.
       rebuilt around a single `Settings(watched_folder_path=...)`
       instance instead of 15 literal keys (every value it supplied
       already matched `Settings`' own default, confirmed by an
-      assertion in the fixture itself). Full suite: 518 passed, 0
-      failures — no behavior change, confirmed by every existing test
-      (including the mocked-boundary router/eval/loadtest tests, which
-      don't touch this function's internals at all) passing unmodified.
+      assertion in the fixture itself).
+
+      **Self-review** (`/code-review` skill, high effort, 8 finder
+      angles) found 2 real gaps in the new tests, both fixed before
+      merge: (1) only 1 of the 15 collapsed fields was actually
+      self-verified against the old hardcoded values, leaving 14 that
+      could silently drift via a stray environment variable (`_env_file
+      =None` only disables `.env` loading — `pydantic-settings` still
+      reads matching OS environment variables) or a future `config.py`
+      default change with nothing to catch it — expanded the assertion
+      to cover every field the function actually reads. (2) the internal
+      `plan_and_retrieve()`/`generate_answer()` calls inside
+      `answer_with_cache()`'s own body were mocked with a bare `@patch`
+      (no `autospec`), so a typo'd kwarg in that internal marshaling —
+      the same class of bug this whole refactor exists to prevent, just
+      relocated one level deeper — would have passed every test and only
+      surfaced against a real request in production. Added
+      `autospec=True` to both patches; all 19 tests in the file still
+      pass, confirming no such typo actually exists today, and closing
+      the gap for the next one. Also fixed a docstring inconsistency
+      (one of two `decompose_*_temperature` references was missing its
+      `settings.` prefix). Two other findings — `plan_and_retrieve()`
+      itself still has the same many-parameter shape this PR fixed on
+      `answer_with_cache()` (the marshaling risk moved rather than
+      vanished, now mitigated by the `autospec` fix above instead of by
+      the signature itself), and `Settings` bundling one collection-name
+      field per deployment mode (prod/eval/loadtest) as a deeper design
+      question — were confirmed real but left as out-of-scope follow-ups
+      rather than expanded into this PR, per this repo's own "never
+      invent architecture" principle.
+
+      Full suite after the fix pass: 518 passed, 0 failures — no
+      behavior change, confirmed by every existing test (including the
+      mocked-boundary router/eval/loadtest tests, which don't touch this
+      function's internals at all) passing unmodified.
 - [x] OpenAPI docs kept accurate — own PR, `feat/openapi-docs-accuracy`.
       Neither `docs/REQUIREMENTS.md` nor this repo's `.claude/CLAUDE.md`
       mandate a specific error-response shape or a standalone

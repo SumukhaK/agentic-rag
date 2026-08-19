@@ -169,10 +169,29 @@ def test_cosine_similarity_is_clamped_to_the_valid_range():
 # --- answer_with_cache: pipeline composition --------------------------------
 
 # Every value below matches Settings' own defaults (config.py) - no field
-# needs overriding for these tests, so the fixture just documents which
-# defaults answer_with_cache() actually reads.
+# needs overriding for these tests. Asserted explicitly (not just claimed
+# in this comment) for every field answer_with_cache() reads, since
+# `_env_file=None` only disables reading .env - pydantic-settings still
+# reads matching OS environment variables by default, so a stray
+# EMBEDDING_MODEL/GENERATION_TEMPERATURE/etc. in the shell running these
+# tests could otherwise make TEST_SETTINGS silently diverge from what
+# this suite believes it's testing.
 TEST_SETTINGS = Settings(watched_folder_path=Path("/tmp/corpus"), _env_file=None)
 assert TEST_SETTINGS.embedding_model == MODEL
+assert TEST_SETTINGS.ollama_base_url == "http://localhost:11434"
+assert TEST_SETTINGS.embedding_timeout_seconds == 30
+assert TEST_SETTINGS.sparse_embedding_model == "Qdrant/bm25"
+assert TEST_SETTINGS.reranker_model == "BAAI/bge-reranker-base"
+assert TEST_SETTINGS.generation_model == "mistral"
+assert TEST_SETTINGS.generation_timeout_seconds == 60
+assert TEST_SETTINGS.generation_temperature == 0.0
+assert TEST_SETTINGS.decompose_temperature == 0.0
+assert TEST_SETTINGS.decompose_retry_temperature == 0.4
+assert TEST_SETTINGS.retrieval_top_k_candidates == 10
+assert TEST_SETTINGS.rerank_top_k == 4
+assert TEST_SETTINGS.max_retrieval_attempts == 5
+assert TEST_SETTINGS.semantic_cache_similarity_threshold == 0.95
+assert TEST_SETTINGS.semantic_cache_ttl_seconds == 300
 
 KWARGS = dict(
     client=object(),
@@ -182,8 +201,8 @@ KWARGS = dict(
 )
 
 
-@patch("agentic_rag.orchestration.semantic_cache.generate_answer")
-@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve")
+@patch("agentic_rag.orchestration.semantic_cache.generate_answer", autospec=True)
+@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve", autospec=True)
 @patch("agentic_rag.embedding.cache.embed_texts")
 def test_answer_with_cache_runs_the_full_pipeline_on_a_cache_miss(
     mock_embed, mock_plan, mock_generate
@@ -202,8 +221,8 @@ def test_answer_with_cache_runs_the_full_pipeline_on_a_cache_miss(
     mock_generate.assert_called_once()
 
 
-@patch("agentic_rag.orchestration.semantic_cache.generate_answer")
-@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve")
+@patch("agentic_rag.orchestration.semantic_cache.generate_answer", autospec=True)
+@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve", autospec=True)
 @patch("agentic_rag.embedding.cache.embed_texts")
 def test_answer_with_cache_skips_the_pipeline_on_a_cache_hit(
     mock_embed, mock_plan, mock_generate
@@ -221,8 +240,8 @@ def test_answer_with_cache_skips_the_pipeline_on_a_cache_hit(
     mock_generate.assert_not_called()
 
 
-@patch("agentic_rag.orchestration.semantic_cache.generate_answer")
-@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve")
+@patch("agentic_rag.orchestration.semantic_cache.generate_answer", autospec=True)
+@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve", autospec=True)
 @patch("agentic_rag.embedding.cache.embed_texts")
 def test_answer_with_cache_populates_the_cache_after_a_miss(
     mock_embed, mock_plan, mock_generate
@@ -240,8 +259,8 @@ def test_answer_with_cache_populates_the_cache_after_a_miss(
     assert result == _answer("Arsenal won 2-1. [1]", [_CITATION])
 
 
-@patch("agentic_rag.orchestration.semantic_cache.generate_answer")
-@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve")
+@patch("agentic_rag.orchestration.semantic_cache.generate_answer", autospec=True)
+@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve", autospec=True)
 @patch("agentic_rag.embedding.cache.embed_texts")
 def test_answer_with_cache_does_not_cache_the_canonical_fallback(
     mock_embed, mock_plan, mock_generate
@@ -264,8 +283,8 @@ def test_answer_with_cache_does_not_cache_the_canonical_fallback(
     assert result is None
 
 
-@patch("agentic_rag.orchestration.semantic_cache.generate_answer")
-@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve")
+@patch("agentic_rag.orchestration.semantic_cache.generate_answer", autospec=True)
+@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve", autospec=True)
 @patch("agentic_rag.embedding.cache.embed_texts")
 def test_answer_with_cache_does_not_cache_an_answer_containing_the_fallback_even_when_sufficient(
     mock_embed, mock_plan, mock_generate
@@ -297,8 +316,8 @@ def test_answer_with_cache_does_not_cache_an_answer_containing_the_fallback_even
     assert result is None
 
 
-@patch("agentic_rag.orchestration.semantic_cache.generate_answer")
-@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve")
+@patch("agentic_rag.orchestration.semantic_cache.generate_answer", autospec=True)
+@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve", autospec=True)
 @patch("agentic_rag.embedding.cache.embed_texts")
 def test_answer_with_cache_does_not_cache_across_different_tiers(
     mock_embed, mock_plan, mock_generate
@@ -317,8 +336,8 @@ def test_answer_with_cache_does_not_cache_across_different_tiers(
     mock_plan.assert_called_once()
 
 
-@patch("agentic_rag.orchestration.semantic_cache.generate_answer")
-@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve")
+@patch("agentic_rag.orchestration.semantic_cache.generate_answer", autospec=True)
+@patch("agentic_rag.orchestration.semantic_cache.plan_and_retrieve", autospec=True)
 @patch("agentic_rag.embedding.cache.embed_texts")
 def test_answer_with_cache_passes_query_and_user_tier_through_to_the_pipeline(
     mock_embed, mock_plan, mock_generate

@@ -195,7 +195,7 @@ def answer_with_cache(
     `settings.generation_temperature` is threaded straight through to
     `generate_answer()` - see that function's docstring for why it's
     required and a separate setting from the judges' `judge_temperature`.
-    `settings.decompose_temperature`/`decompose_retry_temperature` are
+    `settings.decompose_temperature`/`settings.decompose_retry_temperature` are
     threaded straight through to `plan_and_retrieve()` - see its docstring
     (`planning.py`) for why decomposition needs two temperatures, not one,
     unlike every other pinned-temperature call in this codebase.

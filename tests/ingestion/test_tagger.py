@@ -5,20 +5,21 @@ from agentic_rag.ingestion.tagger import (
     UntaggedDocumentError,
     access_tier_for,
 )
+from access_tiers import ACCESS_TIERS, TIER_DIRECTOR, TIER_EMPLOYEE, TIER_MANAGER
 
-KNOWN_TIERS = ["tier-1", "tier-2", "tier-3"]
+KNOWN_TIERS = ACCESS_TIERS
 
 
 def test_access_tier_for_returns_first_path_segment():
-    assert access_tier_for("tier-2/report.txt", KNOWN_TIERS) == "tier-2"
+    assert access_tier_for("manager/report.txt", KNOWN_TIERS) == TIER_MANAGER
 
 
 def test_access_tier_for_supports_nested_paths_within_a_tier():
-    assert access_tier_for("tier-1/subfolder/report.txt", KNOWN_TIERS) == "tier-1"
+    assert access_tier_for("employee/subfolder/report.txt", KNOWN_TIERS) == TIER_EMPLOYEE
 
 
 def test_access_tier_for_normalizes_windows_style_backslash_paths():
-    assert access_tier_for("tier-3\\sub\\report.txt", KNOWN_TIERS) == "tier-3"
+    assert access_tier_for("director\\sub\\report.txt", KNOWN_TIERS) == TIER_DIRECTOR
 
 
 def test_access_tier_for_raises_when_file_has_no_tier_folder():

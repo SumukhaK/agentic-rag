@@ -381,7 +381,7 @@ unfavorable.
 
 Shipped (`src/agentic_rag/ingestion/`):
 - Ingestion source-of-truth: a watched folder, with a tier subfolder per
-  access level (`tier-2/report.txt`)
+  access level (`manager/report.txt`)
 - Folder watcher — deterministic snapshot/diff of the folder, no OS-level
   file-watch dependency, so it's fully testable without timing flakiness
 - `markitdown`-based conversion of any source file type to Markdown
@@ -424,7 +424,7 @@ Shipped (`src/agentic_rag/retrieval/`):
   concurrently, not sequentially
 - Access-tier filtering (`allowed_tiers_for()`) applied to *both* search
   legs before fusion, not to the fused result afterward (FR3) — verified
-  live: a tier-2-only document never appeared in a tier-1 user's results
+  live: a manager-only document never appeared in an employee user's results
 - `rerank()` — local cross-encoder (`BAAI/bge-reranker-base`, substituted
   for the unsupported `bge-reranker-v2-m3`) reranks the top 10 to a top 4,
   replacing the fusion score with a sharper relevance signal

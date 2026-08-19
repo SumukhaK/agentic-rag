@@ -2075,6 +2075,94 @@ building unwired infrastructure to fill the slot.
       process serving real HTTP requests end-to-end. The Dockerfile/
       image build itself remains genuinely unverified - the one piece of
       this task Docker's absence made impossible to prove.
+- [x] Rename access tiers: `tier-1`/`tier-2`/`tier-3` → `employee`/
+      `manager`/`director` — own PR, `refactor/access-tier-names`. The old
+      names were always a placeholder - `docs/REQUIREMENTS.md` §11 said so
+      explicitly, and §14's Open Items literally listed "Real access-tier
+      names" as unresolved. User-requested rename to a real chain-of-
+      command model, applied everywhere: code, tests, docs, real committed
+      data, and the published artifact walkthrough.
+
+      Scoped first via 3 parallel research passes before touching
+      anything: confirmed `allowed_tiers_for()`
+      (`retrieval/access.py`) is purely index/position-based
+      (`known_tiers.index(user_tier)`) and `access_tier_for()`
+      (`ingestion/tagger.py`) is purely membership-based - no regex or
+      parsing of the old "tier-N" pattern anywhere, so this was a safe,
+      logic-free rename. Found **355 occurrences across 26 test files**,
+      hand-typed independently everywhere (no `tests/conftest.py` existed
+      before this PR).
+
+      Renamed: `Settings.access_tiers`/`.env.example` defaults,
+      `loadtest/corpus_generator.py`'s `DEFAULT_ACCESS_TIERS` (+ reworded
+      one representative query whose football-commentary text
+      coincidentally said "the manager" right next to what became the
+      `director` tier, to avoid a confusing collision now that `manager`
+      is also a real tier value), the real `eval/corpus/tier-1`→
+      `eval/corpus/employee` / `tier-2`→`manager` folder rename (`git mv`),
+      `eval/questions.json`, `eval/README.md`'s two tables,
+      `docs/REQUIREMENTS.md` §11 (also reconciled a pre-existing
+      inconsistency - an illustrative "developer"/"manager" example
+      sitting alongside the separate "tier-1/2/3" placeholder default; both
+      unified to the real names), moved §14's now-resolved "Real
+      access-tier names" open item into §13's Resolved Design Decisions
+      table instead of leaving it as an open item with nothing open, and
+      the two Phase 1/Phase 3 status mentions in `README.md`.
+
+      Explicitly **not** rewritten: `PROJECT_TRACKER.md`'s own historical
+      entries above and the already-published "Real 10,000-Document Load
+      Test — Results" sections (this entry included) - both are accurate
+      records of runs that factually used the old tier names at the time;
+      rewriting them would misrepresent history.
+
+      **Centralized per the user's explicit ask**, so a future rename
+      doesn't require re-hunting the whole codebase: new
+      `tests/access_tiers.py` (`TIER_EMPLOYEE`/`TIER_MANAGER`/
+      `TIER_DIRECTOR`/`ACCESS_TIERS`), imported and used across the test
+      suite everywhere a tier appears as a standalone value or a
+      `tmp_path / "tier"`-style path segment; a smaller number of
+      values embedded inside combined literal strings (e.g.
+      `"employee/derby.md"`) were left as plain renamed strings rather
+      than risk an automated string-to-f-string conversion at scale.
+      Production code was already centralized (`Settings.access_tiers`;
+      `loadtest`'s own deliberately-separate `DEFAULT_ACCESS_TIERS`, by
+      design from an earlier fix this session) - no new indirection
+      needed there.
+
+      Self-review during the bulk mechanical rename caught two real bugs
+      before they reached the test run: a blind literal-string replace
+      left broken shorthand comments (`"tier-1/2/3"` → `"employee/2/3"`,
+      since `"tier-2"`/`"tier-3"` never existed as standalone substrings
+      inside that abbreviation) in 2 places, and the same blind pass
+      also corrupted a JSON-string-embedded-in-a-Python-string test
+      fixture (`'["developer", "manager", "director"]'`) by substituting
+      inside the nested string literal - both caught by the full test run
+      (1 failure) and a full-repo grep, then fixed. Separately, the
+      symbolic-constant layer's import-insertion script initially broke
+      9 files by inserting the new import line *inside* an existing
+      multi-line parenthesized `from x import (...)` block - caught via
+      `ast.parse()` syntax-checking every touched file (not just running
+      pytest, which wouldn't have pinpointed the cause as clearly) before
+      the first test run, fixed by tracking parenthesis depth across the
+      existing import block instead of only checking for lines starting
+      with `import`/`from`.
+
+      Full suite: 518 passed, 0 failures. **Live-verified**: ran
+      `python -m agentic_rag.evaluation.runner` against the renamed
+      `eval/corpus/`/`eval/questions.json` end to end against real Ollama
+      and real embedded Qdrant - produced metrics byte-identical to the
+      previously-documented example (`retrieval_precision: 1.0`,
+      `faithfulness_rate: 0.75`, `hallucination_rate: 0.167`,
+      `errored_count: 0`, `average_duration_seconds: 76.7`), confirming
+      zero behavioral regression from the rename. Also deleted (user-
+      confirmed via `AskUserQuestion`) ~13GB of gitignored `loadtest/`
+      runtime data (`watched/`, `corpus_staging/`, `qdrant/`,
+      `sync_snapshot.json`, `run.log`) left over from the already-
+      concluded, already-written-up load test above, since it was keyed
+      to the old tier names and not practical to rename in place
+      (`loadtest/qdrant/` stores tier values inside Qdrant point
+      payloads, not folder names) - disposable and regenerable in ~35s
+      if ever needed again.
 
 ---
 

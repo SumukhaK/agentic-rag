@@ -14,13 +14,14 @@ from agentic_rag.indexing.upsert import _path_filter
 from agentic_rag.ingestion.pipeline import IngestionFailure
 from agentic_rag.ingestion.scheduler import SyncCycleResult, run_sync_cycle, run_sync_loop
 from agentic_rag.ingestion.watcher import FileState, snapshot
+from access_tiers import ACCESS_TIERS, TIER_EMPLOYEE
 
-KNOWN_TIERS = ["tier-1", "tier-2", "tier-3"]
+KNOWN_TIERS = ACCESS_TIERS
 SPARSE_MODEL = "Qdrant/bm25"
 COLLECTION = "documents"
-TIER_1_A = os.path.join("tier-1", "a.txt")
-TIER_1_B = os.path.join("tier-1", "b.txt")
-TIER_1_GOOD = os.path.join("tier-1", "good.txt")
+TIER_1_A = os.path.join(TIER_EMPLOYEE, "a.txt")
+TIER_1_B = os.path.join(TIER_EMPLOYEE, "b.txt")
+TIER_1_GOOD = os.path.join(TIER_EMPLOYEE, "good.txt")
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -70,8 +71,8 @@ def _count_points_for(client, relative_path):
 @patch("agentic_rag.indexing.upsert.embed_texts")
 def test_run_sync_cycle_indexes_a_new_document(mock_embed_texts, tmp_path):
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    (corpus / "tier-1" / "a.txt").write_text("Arsenal drew 1-1.")
+    (corpus / TIER_EMPLOYEE).mkdir()
+    (corpus / TIER_EMPLOYEE / "a.txt").write_text("Arsenal drew 1-1.")
     mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
     client = _client(tmp_path / "qdrant")
 
@@ -92,8 +93,8 @@ def test_run_sync_cycle_indexes_a_new_document(mock_embed_texts, tmp_path):
 @patch("agentic_rag.indexing.upsert.embed_texts")
 def test_run_sync_cycle_deletes_a_removed_document(mock_embed_texts, tmp_path):
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    file_path = corpus / "tier-1" / "a.txt"
+    (corpus / TIER_EMPLOYEE).mkdir()
+    file_path = corpus / TIER_EMPLOYEE / "a.txt"
     file_path.write_text("Arsenal drew 1-1.")
     mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
     client = _client(tmp_path / "qdrant")
@@ -116,8 +117,8 @@ def test_run_sync_cycle_returns_the_current_snapshot_for_the_next_cycle(
     mock_embed_texts, tmp_path
 ):
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    (corpus / "tier-1" / "a.txt").write_text("Arsenal drew 1-1.")
+    (corpus / TIER_EMPLOYEE).mkdir()
+    (corpus / TIER_EMPLOYEE / "a.txt").write_text("Arsenal drew 1-1.")
     mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
     client = _client(tmp_path / "qdrant")
 
@@ -135,8 +136,8 @@ def test_run_sync_cycle_isolates_an_ingestion_failure_from_indexing(
     mock_embed_texts, tmp_path
 ):
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    (corpus / "tier-1" / "good.txt").write_text("Arsenal drew 1-1.")
+    (corpus / TIER_EMPLOYEE).mkdir()
+    (corpus / TIER_EMPLOYEE / "good.txt").write_text("Arsenal drew 1-1.")
     (corpus / "bad.txt").write_text("no tier folder")
     mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
     client = _client(tmp_path / "qdrant")
@@ -179,9 +180,9 @@ def test_run_sync_cycle_isolates_an_indexing_failure_from_other_documents(
     mock_index_document, tmp_path
 ):
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    (corpus / "tier-1" / "a.txt").write_text("Arsenal drew 1-1.")
-    (corpus / "tier-1" / "b.txt").write_text("Chelsea won 3-0.")
+    (corpus / TIER_EMPLOYEE).mkdir()
+    (corpus / TIER_EMPLOYEE / "a.txt").write_text("Arsenal drew 1-1.")
+    (corpus / TIER_EMPLOYEE / "b.txt").write_text("Chelsea won 3-0.")
     mock_index_document.side_effect = [None, RuntimeError("embedding boom")]
     client = _client(tmp_path / "qdrant")
 
@@ -201,8 +202,8 @@ def test_run_sync_cycle_retries_a_failed_document_on_the_next_cycle(
     mock_index_document, tmp_path
 ):
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    (corpus / "tier-1" / "a.txt").write_text("Arsenal drew 1-1.")
+    (corpus / TIER_EMPLOYEE).mkdir()
+    (corpus / TIER_EMPLOYEE / "a.txt").write_text("Arsenal drew 1-1.")
     mock_index_document.side_effect = RuntimeError("embedding boom")
     client = _client(tmp_path / "qdrant")
     settings = _settings(corpus, tmp_path / "qdrant")
@@ -226,9 +227,9 @@ def test_run_sync_cycle_isolates_a_deletion_failure_from_other_deletions(
     mock_embed_texts, mock_delete_document, tmp_path
 ):
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    a_path = corpus / "tier-1" / "a.txt"
-    b_path = corpus / "tier-1" / "b.txt"
+    (corpus / TIER_EMPLOYEE).mkdir()
+    a_path = corpus / TIER_EMPLOYEE / "a.txt"
+    b_path = corpus / TIER_EMPLOYEE / "b.txt"
     a_path.write_text("Arsenal drew 1-1.")
     b_path.write_text("Chelsea won 3-0.")
     mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
@@ -255,8 +256,8 @@ def test_run_sync_cycle_retries_a_failed_deletion_on_the_next_cycle(
     mock_embed_texts, mock_delete_document, tmp_path
 ):
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    file_path = corpus / "tier-1" / "a.txt"
+    (corpus / TIER_EMPLOYEE).mkdir()
+    file_path = corpus / TIER_EMPLOYEE / "a.txt"
     file_path.write_text("Arsenal drew 1-1.")
     mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
     client = _client(tmp_path / "qdrant")
@@ -288,9 +289,9 @@ def test_run_sync_cycle_stops_indexing_early_when_stop_event_is_set(
     mock_index_document, tmp_path
 ):
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    (corpus / "tier-1" / "a.txt").write_text("Arsenal drew 1-1.")
-    (corpus / "tier-1" / "b.txt").write_text("Chelsea won 3-0.")
+    (corpus / TIER_EMPLOYEE).mkdir()
+    (corpus / TIER_EMPLOYEE / "a.txt").write_text("Arsenal drew 1-1.")
+    (corpus / TIER_EMPLOYEE / "b.txt").write_text("Chelsea won 3-0.")
     client = _client(tmp_path / "qdrant")
     settings = _settings(corpus, tmp_path / "qdrant")
     stop_event = threading.Event()
@@ -318,9 +319,9 @@ def test_run_sync_cycle_stops_deleting_early_when_stop_event_is_set(
     mock_embed_texts, mock_delete_document, tmp_path
 ):
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    a_path = corpus / "tier-1" / "a.txt"
-    b_path = corpus / "tier-1" / "b.txt"
+    (corpus / TIER_EMPLOYEE).mkdir()
+    a_path = corpus / TIER_EMPLOYEE / "a.txt"
+    b_path = corpus / TIER_EMPLOYEE / "b.txt"
     a_path.write_text("Arsenal drew 1-1.")
     b_path.write_text("Chelsea won 3-0.")
     mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
@@ -359,8 +360,8 @@ def test_run_sync_cycle_uses_a_fresh_embedding_cache_each_call(
     # cycle was chosen to bound memory at target scale (10,000+ docs)
     # rather than let a process-lifetime cache grow unbounded.
     corpus = _corpus(tmp_path)
-    (corpus / "tier-1").mkdir()
-    (corpus / "tier-1" / "a.txt").write_text("Arsenal drew 1-1.")
+    (corpus / TIER_EMPLOYEE).mkdir()
+    (corpus / TIER_EMPLOYEE / "a.txt").write_text("Arsenal drew 1-1.")
     mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
     client = _client(tmp_path / "qdrant")
     settings = _settings(corpus, tmp_path / "qdrant")
@@ -523,7 +524,7 @@ def test_run_sync_loop_logs_failure_paths_not_just_counts(
         indexed=[],
         deleted=[],
         ingestion_failures=[],
-        indexing_failures=[IngestionFailure(relative_path="tier-1/bad.md", reason="boom")],
+        indexing_failures=[IngestionFailure(relative_path="employee/bad.md", reason="boom")],
         deletion_failures=[],
     )
     mock_run_cycle.side_effect = [(result, {})]
@@ -537,7 +538,7 @@ def test_run_sync_loop_logs_failure_paths_not_just_counts(
     asyncio.run(_run())
 
     kwargs = mock_log_cycle.call_args.kwargs
-    assert kwargs["indexing_failure_paths"] == ["tier-1/bad.md"]
+    assert kwargs["indexing_failure_paths"] == ["employee/bad.md"]
 
 
 @patch("agentic_rag.ingestion.scheduler.time.monotonic", side_effect=itertools.count(0, 1))

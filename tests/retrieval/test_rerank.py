@@ -2,16 +2,17 @@ import pytest
 
 from agentic_rag.retrieval.rerank import RerankError, rerank
 from agentic_rag.retrieval.search import SearchCandidate
+from access_tiers import TIER_EMPLOYEE
 
 MODEL = "BAAI/bge-reranker-base"
 
 
-def _candidate(text, relative_path="tier-1/a.txt", chunk_index=0, score=0.0):
+def _candidate(text, relative_path="employee/a.txt", chunk_index=0, score=0.0):
     return SearchCandidate(
         relative_path=relative_path,
         chunk_index=chunk_index,
         text=text,
-        access_tier="tier-1",
+        access_tier=TIER_EMPLOYEE,
         score=score,
     )
 
@@ -27,11 +28,11 @@ def _require_reranker_model():
 def test_rerank_orders_candidates_by_relevance_to_the_query():
     relevant = _candidate(
         "Arsenal drew 1-1 against Chelsea in a tense London derby.",
-        relative_path="tier-1/football.txt",
+        relative_path="employee/football.txt",
     )
     irrelevant = _candidate(
         "It rained heavily across the south of England this weekend.",
-        relative_path="tier-1/weather.txt",
+        relative_path="employee/weather.txt",
     )
 
     results = rerank(
@@ -39,8 +40,8 @@ def test_rerank_orders_candidates_by_relevance_to_the_query():
     )
 
     assert [c.relative_path for c in results] == [
-        "tier-1/football.txt",
-        "tier-1/weather.txt",
+        "employee/football.txt",
+        "employee/weather.txt",
     ]
 
 

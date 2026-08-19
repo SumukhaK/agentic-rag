@@ -10,10 +10,11 @@ from agentic_rag.ingestion.chunker import Chunk
 from agentic_rag.ingestion.pipeline import IngestedDocument
 from agentic_rag.retrieval.access import UnknownAccessTierError
 from agentic_rag.retrieval.search import hybrid_search
+from access_tiers import ACCESS_TIERS, TIER_EMPLOYEE, TIER_MANAGER
 
 SPARSE_MODEL = "Qdrant/bm25"
 COLLECTION = "documents"
-KNOWN_TIERS = ["tier-1", "tier-2", "tier-3"]
+KNOWN_TIERS = ACCESS_TIERS
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -82,42 +83,42 @@ def _search(client, query, user_tier, top_k=10, known_tiers=None):
 
 
 def test_hybrid_search_returns_a_matching_candidate(client):
-    _index(client, "tier-1/a.txt", "Arsenal drew 1-1 against Chelsea.", "tier-1")
+    _index(client, "employee/a.txt", "Arsenal drew 1-1 against Chelsea.", TIER_EMPLOYEE)
 
-    results = _search(client, "Arsenal Chelsea draw", user_tier="tier-1")
+    results = _search(client, "Arsenal Chelsea draw", user_tier=TIER_EMPLOYEE)
 
     assert len(results) == 1
     candidate = results[0]
-    assert candidate.relative_path == "tier-1/a.txt"
+    assert candidate.relative_path == "employee/a.txt"
     assert candidate.chunk_index == 0
     assert candidate.text == "Arsenal drew 1-1 against Chelsea."
-    assert candidate.access_tier == "tier-1"
+    assert candidate.access_tier == TIER_EMPLOYEE
     assert candidate.score > 0
 
 
 def test_hybrid_search_excludes_candidates_above_the_users_tier(client):
-    _index(client, "tier-1/a.txt", "Arsenal drew 1-1 against Chelsea.", "tier-1")
-    _index(client, "tier-2/b.txt", "Arsenal internal transfer budget report.", "tier-2")
+    _index(client, "employee/a.txt", "Arsenal drew 1-1 against Chelsea.", TIER_EMPLOYEE)
+    _index(client, "manager/b.txt", "Arsenal internal transfer budget report.", TIER_MANAGER)
 
-    results = _search(client, "Arsenal", user_tier="tier-1")
+    results = _search(client, "Arsenal", user_tier=TIER_EMPLOYEE)
 
-    assert [c.relative_path for c in results] == ["tier-1/a.txt"]
+    assert [c.relative_path for c in results] == ["employee/a.txt"]
 
 
 def test_hybrid_search_includes_candidates_at_or_below_the_users_tier(client):
-    _index(client, "tier-1/a.txt", "Arsenal drew 1-1 against Chelsea.", "tier-1")
-    _index(client, "tier-2/b.txt", "Arsenal internal transfer budget report.", "tier-2")
+    _index(client, "employee/a.txt", "Arsenal drew 1-1 against Chelsea.", TIER_EMPLOYEE)
+    _index(client, "manager/b.txt", "Arsenal internal transfer budget report.", TIER_MANAGER)
 
-    results = _search(client, "Arsenal", user_tier="tier-2")
+    results = _search(client, "Arsenal", user_tier=TIER_MANAGER)
 
-    assert {c.relative_path for c in results} == {"tier-1/a.txt", "tier-2/b.txt"}
+    assert {c.relative_path for c in results} == {"employee/a.txt", "manager/b.txt"}
 
 
 def test_hybrid_search_respects_top_k(client):
     for i in range(5):
-        _index(client, f"tier-1/{i}.txt", f"Arsenal match report number {i}.", "tier-1")
+        _index(client, f"employee/{i}.txt", f"Arsenal match report number {i}.", TIER_EMPLOYEE)
 
-    results = _search(client, "Arsenal", user_tier="tier-1", top_k=3)
+    results = _search(client, "Arsenal", user_tier=TIER_EMPLOYEE, top_k=3)
 
     assert len(results) <= 3
 
@@ -128,13 +129,13 @@ def test_hybrid_search_raises_for_an_unknown_user_tier(client):
 
 
 def test_hybrid_search_returns_empty_list_for_an_empty_collection(client):
-    assert _search(client, "Arsenal", user_tier="tier-1") == []
+    assert _search(client, "Arsenal", user_tier=TIER_EMPLOYEE) == []
 
 
 def test_hybrid_search_returns_empty_list_when_nothing_matches_the_users_tier(client):
-    _index(client, "tier-2/a.txt", "Arsenal internal transfer budget report.", "tier-2")
+    _index(client, "manager/a.txt", "Arsenal internal transfer budget report.", TIER_MANAGER)
 
-    assert _search(client, "Arsenal", user_tier="tier-1") == []
+    assert _search(client, "Arsenal", user_tier=TIER_EMPLOYEE) == []
 
 
 def test_hybrid_search_prefetches_more_than_top_k_for_accurate_fusion(client):
@@ -144,7 +145,7 @@ def test_hybrid_search_prefetches_more_than_top_k_for_accurate_fusion(client):
     # fusion - would never be fetched at all. Prefetch must over-fetch.
     with patch.object(client, "query_points") as mock_query_points:
         mock_query_points.return_value = Mock(points=[])
-        _search(client, "Arsenal", user_tier="tier-1", top_k=10)
+        _search(client, "Arsenal", user_tier=TIER_EMPLOYEE, top_k=10)
 
     call_kwargs = mock_query_points.call_args.kwargs
     for prefetch in call_kwargs["prefetch"]:

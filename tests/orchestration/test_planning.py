@@ -12,6 +12,7 @@ from agentic_rag.orchestration.planning import (
 from agentic_rag.retrieval.access import UnknownAccessTierError
 from agentic_rag.retrieval.rerank import RerankError
 from agentic_rag.retrieval.search import SearchCandidate
+from access_tiers import TIER_EMPLOYEE, TIER_MANAGER
 
 KWARGS = dict(
     client=object(),
@@ -25,8 +26,8 @@ KWARGS = dict(
     reranker_model="BAAI/bge-reranker-base",
     generation_model="mistral",
     generation_timeout_seconds=60,
-    user_tier="tier-1",
-    known_tiers=["tier-1", "tier-2"],
+    user_tier=TIER_EMPLOYEE,
+    known_tiers=[TIER_EMPLOYEE, TIER_MANAGER],
     retrieval_top_k=10,
     rerank_top_k=4,
     max_attempts=5,
@@ -37,10 +38,10 @@ KWARGS = dict(
 
 def _candidate(text="Arsenal drew 1-1."):
     return SearchCandidate(
-        relative_path="tier-1/a.txt",
+        relative_path="employee/a.txt",
         chunk_index=0,
         text=text,
-        access_tier="tier-1",
+        access_tier=TIER_EMPLOYEE,
         score=1.0,
     )
 

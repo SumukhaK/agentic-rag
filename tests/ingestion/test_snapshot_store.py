@@ -13,8 +13,8 @@ def test_load_snapshot_returns_empty_when_the_file_does_not_exist_yet(tmp_path):
 
 def test_save_then_load_round_trips_a_snapshot(tmp_path):
     snapshot = {
-        "tier-1/a.txt": FileState(size=100, mtime_ns=123456789),
-        "tier-2/report.md": FileState(size=42, mtime_ns=987654321),
+        "employee/a.txt": FileState(size=100, mtime_ns=123456789),
+        "manager/report.md": FileState(size=42, mtime_ns=987654321),
     }
     path = tmp_path / "snapshot.json"
 

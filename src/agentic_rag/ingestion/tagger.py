@@ -23,7 +23,7 @@ def access_tier_for(relative_path: str, known_tiers: list[str]) -> str:
     """Derive a document's access tier from its first path segment.
 
     Convention: every document lives under a top-level subfolder named after
-    its tier, e.g. `tier-2/report.txt` or `tier-1/subfolder/report.txt`.
+    its tier, e.g. `manager/report.txt` or `employee/subfolder/report.txt`.
     """
     parts = PurePosixPath(relative_path.replace("\\", "/")).parts
     if len(parts) < 2:

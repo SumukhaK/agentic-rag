@@ -9,6 +9,7 @@ from agentic_rag.indexing.qdrant_setup import ensure_collection, get_client
 from agentic_rag.indexing.upsert import _path_filter, delete_document, index_document
 from agentic_rag.ingestion.chunker import Chunk
 from agentic_rag.ingestion.pipeline import IngestedDocument
+from access_tiers import TIER_EMPLOYEE
 
 SPARSE_MODEL = "Qdrant/bm25"
 COLLECTION = "documents"
@@ -29,12 +30,12 @@ def client(tmp_path):
     return client
 
 
-def _document(relative_path="tier-1/a.txt", chunk_texts=("Arsenal drew 1-1.",)):
+def _document(relative_path="employee/a.txt", chunk_texts=("Arsenal drew 1-1.",)):
     return IngestedDocument(
         relative_path=relative_path,
         markdown="\n\n".join(chunk_texts),
         chunks=[Chunk(text=text, index=i) for i, text in enumerate(chunk_texts)],
-        access_tier="tier-1",
+        access_tier=TIER_EMPLOYEE,
     )
 
 
@@ -67,7 +68,7 @@ def test_index_document_upserts_one_point_per_chunk(mock_embed_texts, client):
 
     _index(client, document, mock_embed_texts, [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
 
-    assert _count_points_for(client, "tier-1/a.txt") == 2
+    assert _count_points_for(client, "employee/a.txt") == 2
 
 
 @patch("agentic_rag.indexing.upsert.embed_texts")
@@ -89,10 +90,10 @@ def test_index_document_sets_dense_sparse_and_payload_on_each_point(
     assert dense[0] / dense[1] == pytest.approx(0.1 / 0.2)
     assert dense[1] / dense[2] == pytest.approx(0.2 / 0.3)
     assert len(point.vector["sparse"].indices) > 0
-    assert point.payload["relative_path"] == "tier-1/a.txt"
+    assert point.payload["relative_path"] == "employee/a.txt"
     assert point.payload["chunk_index"] == 0
     assert point.payload["text"] == "Arsenal drew 1-1."
-    assert point.payload["access_tier"] == "tier-1"
+    assert point.payload["access_tier"] == TIER_EMPLOYEE
 
 
 @patch("agentic_rag.indexing.upsert.embed_texts")
@@ -101,12 +102,12 @@ def test_index_document_reindexing_with_fewer_chunks_removes_stale_points(
 ):
     original = _document(chunk_texts=("one", "two", "three"))
     _index(client, original, mock_embed_texts, [[0.1, 0.2, 0.3]] * 3)
-    assert _count_points_for(client, "tier-1/a.txt") == 3
+    assert _count_points_for(client, "employee/a.txt") == 3
 
     edited = _document(chunk_texts=("one",))
     _index(client, edited, mock_embed_texts, [[0.1, 0.2, 0.3]])
 
-    assert _count_points_for(client, "tier-1/a.txt") == 1
+    assert _count_points_for(client, "employee/a.txt") == 1
 
 
 @patch("agentic_rag.indexing.upsert.embed_texts")
@@ -115,7 +116,7 @@ def test_index_document_leaves_existing_points_untouched_when_embedding_fails(
 ):
     original = _document(chunk_texts=("one", "two"))
     _index(client, original, mock_embed_texts, [[0.1, 0.2, 0.3]] * 2)
-    assert _count_points_for(client, "tier-1/a.txt") == 2
+    assert _count_points_for(client, "employee/a.txt") == 2
 
     mock_embed_texts.side_effect = EmbeddingError("Ollama is momentarily unreachable")
     with pytest.raises(EmbeddingError):
@@ -133,7 +134,7 @@ def test_index_document_leaves_existing_points_untouched_when_embedding_fails(
     # A transient embedding failure must not delete a document that was
     # already indexed - it should stay searchable with its prior content
     # until a reindex actually succeeds.
-    assert _count_points_for(client, "tier-1/a.txt") == 2
+    assert _count_points_for(client, "employee/a.txt") == 2
 
 
 @patch("agentic_rag.indexing.upsert.embed_texts")
@@ -158,7 +159,7 @@ def test_index_document_raises_on_embedding_count_mismatch_instead_of_indexing_p
             embedding_cache=EmbeddingCache(),
         )
 
-    assert _count_points_for(client, "tier-1/a.txt") == 0
+    assert _count_points_for(client, "employee/a.txt") == 0
 
 
 @patch("agentic_rag.indexing.upsert.embed_texts")
@@ -168,32 +169,32 @@ def test_index_document_reuses_a_shared_cache_across_documents(mock_embed_texts,
     # embedded once, on the first call.
     cache = EmbeddingCache()
     mock_embed_texts.return_value = [[0.1, 0.2, 0.3]]
-    doc_a = _document(relative_path="tier-1/a.txt", chunk_texts=("shared boilerplate",))
+    doc_a = _document(relative_path="employee/a.txt", chunk_texts=("shared boilerplate",))
     _index(client, doc_a, mock_embed_texts, [[0.1, 0.2, 0.3]], cache=cache)
     assert mock_embed_texts.call_count == 1
 
-    doc_b = _document(relative_path="tier-1/b.txt", chunk_texts=("shared boilerplate",))
+    doc_b = _document(relative_path="employee/b.txt", chunk_texts=("shared boilerplate",))
     _index(client, doc_b, mock_embed_texts, [[0.1, 0.2, 0.3]], cache=cache)
 
     # embed_texts should NOT have been called again for the same text.
     assert mock_embed_texts.call_count == 1
-    assert _count_points_for(client, "tier-1/b.txt") == 1
+    assert _count_points_for(client, "employee/b.txt") == 1
 
 
 @patch("agentic_rag.indexing.upsert.embed_texts")
 def test_delete_document_removes_all_points_for_that_path_only(
     mock_embed_texts, client
 ):
-    doc_a = _document(relative_path="tier-1/a.txt")
-    doc_b = _document(relative_path="tier-1/b.txt")
+    doc_a = _document(relative_path="employee/a.txt")
+    doc_b = _document(relative_path="employee/b.txt")
     _index(client, doc_a, mock_embed_texts, [[0.1, 0.2, 0.3]])
     _index(client, doc_b, mock_embed_texts, [[0.1, 0.2, 0.3]])
 
-    delete_document(client, collection_name=COLLECTION, relative_path="tier-1/a.txt")
+    delete_document(client, collection_name=COLLECTION, relative_path="employee/a.txt")
 
-    assert _count_points_for(client, "tier-1/a.txt") == 0
-    assert _count_points_for(client, "tier-1/b.txt") == 1
+    assert _count_points_for(client, "employee/a.txt") == 0
+    assert _count_points_for(client, "employee/b.txt") == 1
 
 
 def test_delete_document_is_a_no_op_when_nothing_indexed_yet(client):
-    delete_document(client, collection_name=COLLECTION, relative_path="tier-1/a.txt")  # no raise
+    delete_document(client, collection_name=COLLECTION, relative_path="employee/a.txt")  # no raise

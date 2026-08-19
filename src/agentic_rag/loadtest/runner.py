@@ -30,10 +30,13 @@ from agentic_rag.orchestration.semantic_cache import SemanticCache, answer_with_
 # holds the full target-scale document count, closing the gap the
 # ingestion-only 150k theoretical analysis (README.md) left open.
 _REPRESENTATIVE_QUERIES: list[tuple[str, str]] = [
-    ("What was the score in the match reported as doc_00000?", "tier-1"),
-    ("Which tactical approach was used in a tier-1 fixture?", "tier-1"),
-    ("Summarize a match report from tier-2.", "tier-2"),
-    ("What did the manager say after a tier-3 fixture?", "tier-3"),
+    ("What was the score in the match reported as doc_00000?", "employee"),
+    ("Which tactical approach was used in a fixture from the employee tier?", "employee"),
+    ("Summarize a match report from the manager tier.", "manager"),
+    # "the club", not "the manager" - the manager tier is now a real access
+    # tier value, and this query text would otherwise read as a coincidental
+    # (and confusing) reference to it rather than a football team's manager.
+    ("What did the club say after a fixture from the director tier?", "director"),
 ]
 
 
@@ -263,15 +266,16 @@ def _run_query_latency_phase(*, settings: Settings, client: QdrantClient) -> lis
     A fresh `SemanticCache()` *per query*, not shared across the loop -
     matches `_run_question()`'s own documented reasoning
     (`evaluation/runner.py`): two representative queries share a tier
-    (`tier-1`), and a shared cache risks the second being served the
+    (`employee`), and a shared cache risks the second being served the
     first's cached answer if their embeddings land close enough, which
     would record a cache-lookup time instead of a real round trip.
 
     `known_tiers=DEFAULT_ACCESS_TIERS` (not `settings.access_tiers`) for
     the same isolation reason `_index_one_batch()`'s `access_tiers`
-    override exists - these queries' hardcoded tier-1/2/3 `user_tier`
-    values must validate against the load test's own fixed tier layout,
-    not whatever the main app's `Settings.access_tiers` happens to be.
+    override exists - these queries' hardcoded `employee`/`manager`/
+    `director` `user_tier` values must validate against the load test's
+    own fixed tier layout, not whatever the main app's
+    `Settings.access_tiers` happens to be.
     """
     embedding_cache = EmbeddingCache()
     latencies: list[float] = []

@@ -10,11 +10,12 @@ from agentic_rag.orchestration.planning import (
     RetrievalOutcome,
 )
 from agentic_rag.retrieval.search import SearchCandidate
+from access_tiers import TIER_EMPLOYEE
 
 KWARGS = dict(model="mistral", base_url="http://localhost:11434", timeout=60, temperature=0.0)
 
 
-def _candidate(relative_path="tier-1/a.txt", chunk_index=0, text="Arsenal drew 1-1.", access_tier="tier-1"):
+def _candidate(relative_path="employee/a.txt", chunk_index=0, text="Arsenal drew 1-1.", access_tier=TIER_EMPLOYEE):
     return SearchCandidate(
         relative_path=relative_path,
         chunk_index=chunk_index,
@@ -57,7 +58,7 @@ def test_generate_answer_returns_the_generated_text_when_citations_are_valid(moc
 
     assert answer.text == "Arsenal drew 1-1 against Chelsea [1]."
     assert answer.citations == [
-        Citation(number=1, relative_path="tier-1/a.txt", chunk_index=0, access_tier="tier-1")
+        Citation(number=1, relative_path="employee/a.txt", chunk_index=0, access_tier=TIER_EMPLOYEE)
     ]
 
 
@@ -134,8 +135,8 @@ def test_generate_answer_prompt_includes_query_grounding_rules_and_sources(mock_
     prompt = mock_generate.call_args.args[0]
     assert "Who scored?" in prompt
     assert "Arsenal drew 1-1 against Chelsea." in prompt
-    assert "tier-1/a.txt" in prompt
-    assert "tier-1" in prompt
+    assert "employee/a.txt" in prompt
+    assert TIER_EMPLOYEE in prompt
     assert "3" in prompt  # chunk_index - citations must identify the exact chunk, not just the file
     assert CANNOT_ANSWER_MESSAGE in prompt
     assert "[1]" in prompt
@@ -180,8 +181,8 @@ def test_generate_answer_labels_distinct_candidates_with_increasing_citation_num
     assert "[1]" in prompt
     assert "[2]" in prompt
     assert answer.citations == [
-        Citation(number=1, relative_path="tier-1/a.txt", chunk_index=0, access_tier="tier-1"),
-        Citation(number=2, relative_path="tier-1/a.txt", chunk_index=1, access_tier="tier-1"),
+        Citation(number=1, relative_path="employee/a.txt", chunk_index=0, access_tier=TIER_EMPLOYEE),
+        Citation(number=2, relative_path="employee/a.txt", chunk_index=1, access_tier=TIER_EMPLOYEE),
     ]
 
 
@@ -206,7 +207,7 @@ def test_generate_answer_citations_only_include_numbers_actually_cited(mock_gene
     answer = generate_answer(planning_result, query="Recap", **KWARGS)
 
     assert answer.citations == [
-        Citation(number=1, relative_path="tier-1/a.txt", chunk_index=0, access_tier="tier-1")
+        Citation(number=1, relative_path="employee/a.txt", chunk_index=0, access_tier=TIER_EMPLOYEE)
     ]
 
 

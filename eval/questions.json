@@ -2,41 +2,41 @@
   {
     "id": "q1-derby-score",
     "query": "Who won the north London derby between Arsenal and Tottenham, and what was the score?",
-    "user_tier": "tier-1",
+    "user_tier": "employee",
     "expected_answerable": true,
-    "expected_source_paths": ["tier-1/derby.md"]
+    "expected_source_paths": ["employee/derby.md"]
   },
   {
     "id": "q2-caicedo-fee",
     "query": "How much did Chelsea pay to sign Moises Caicedo from Brighton?",
-    "user_tier": "tier-1",
+    "user_tier": "employee",
     "expected_answerable": true,
-    "expected_source_paths": ["tier-1/transfer.md"]
+    "expected_source_paths": ["employee/transfer.md"]
   },
   {
     "id": "q3-debruyne-injury",
     "query": "What injury did Kevin De Bruyne suffer, and when?",
-    "user_tier": "tier-2",
+    "user_tier": "manager",
     "expected_answerable": true,
-    "expected_source_paths": ["tier-2/injury-report.md"]
+    "expected_source_paths": ["manager/injury-report.md"]
   },
   {
     "id": "q4-haaland-contract",
     "query": "Until what year did Erling Haaland extend his contract with Manchester City?",
-    "user_tier": "tier-2",
+    "user_tier": "manager",
     "expected_answerable": true,
-    "expected_source_paths": ["tier-2/contract.md"]
+    "expected_source_paths": ["manager/contract.md"]
   },
   {
     "id": "q5-unanswerable-world-cup",
     "query": "Who won the FIFA World Cup in 1998?",
-    "user_tier": "tier-1",
+    "user_tier": "employee",
     "expected_answerable": false
   },
   {
     "id": "q6-unanswerable-messi-transfer",
     "query": "What was Lionel Messi's transfer fee when he joined Inter Miami?",
-    "user_tier": "tier-2",
+    "user_tier": "manager",
     "expected_answerable": false
   }
 ]

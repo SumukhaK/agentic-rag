@@ -191,8 +191,8 @@ alone be cited in an answer. **Implemented as**: `hybrid_search()` computes
 `Filter(FieldCondition(access_tier, MatchAny(allowed_tiers)))` on each of the
 dense and sparse `Prefetch` queries — a disallowed chunk is excluded from the
 candidate pool Qdrant fuses over, not filtered out of the result afterward.
-Verified live: a tier-2-only chunk never appeared in a tier-1 user's results,
-in a real search against a real Ollama-embedded query.
+Verified live: a manager-only chunk never appeared in an employee user's
+results, in a real search against a real Ollama-embedded query.
 
 ## 7. Caching
 
@@ -475,20 +475,20 @@ start at the same value.
 - Every document/chunk carries an access-level tag.
 - **Model: simple linear tiers.** Access levels form a single ordered list
   (lowest → highest); a user at a given tier can see content tagged at their
-  tier **or any tier below it**, matching the stated example ("developer"
-  can't see "manager"-only docs; a "manager" can see "developer"-level docs).
+  tier **or any tier below it** ("employee" can't see "manager"-only docs;
+  a "manager" can see "employee"-level docs).
 - The ordered tier list itself is **configuration, not hardcoded** — it lives
   in the central config module (`.claude/CLAUDE.md` §5) so the real
-  organizational role names can be supplied without a code change. A
-  placeholder tier list (e.g. `tier-1 < tier-2 < tier-3`) is used for
-  development/tests until the real list is provided.
+  organizational role names can be supplied without a code change. The real
+  tier list is `employee < manager < director` — a chain-of-command model,
+  not arbitrary placeholder labels.
 - Access filtering happens **at retrieval time** (§6, step 4/5) — a chunk the
   user isn't permitted to see must be excluded before fusion/reranking, not
   filtered out after the fact.
 - **Tagging mechanism (ingestion side): folder-per-tier.** A document's tier
   is its top-level subfolder under `WATCHED_FOLDER_PATH`, e.g.
-  `tier-2/report.txt` (nesting further inside that folder is fine —
-  `tier-1/quarterly/report.txt` is still tier-1). A document placed directly
+  `manager/report.txt` (nesting further inside that folder is fine —
+  `employee/quarterly/report.txt` is still employee). A document placed directly
   under the watched root, with no tier subfolder, is rejected loudly
   (`UntaggedDocumentError`) rather than silently defaulting to a tier — same
   for a subfolder name that isn't in the configured `ACCESS_TIERS` list
@@ -655,8 +655,8 @@ Log of decisions made explicitly during planning, for traceability:
 | `decompose_query()`'s temperature strategy | Escalating per attempt — `0.0` on the first `plan_and_retrieve()` attempt, a higher `decompose_retry_temperature` (default `0.4`) on every retry | Naively pinning to `0.0` everywhere (matching `generate_answer()`/`rewrite_query()`) would have silently defeated the retry loop's own documented purpose — it depends on `decompose_query()` varying across attempts to give a "fresh chance at different phrasing." A single non-zero value would have left the original live-confirmed bug (identical calls producing different, sometimes-wrong sufficiency verdicts) unfixed for the common first-attempt case. Escalating per attempt fixes the common case deterministically while keeping the retry loop's actual mechanism intact, as a deliberate strategy instead of accidental randomness. |
 | Evaluation judge model (Phase 8) | Local `qwen2.5:14b-instruct` via Ollama, not Claude | No `ANTHROPIC_API_KEY` is configured for this project (§14's prior open item). The user proposed a local open-weight model "bigger than mistral, not as frontier as Claude" instead. This machine's actual GPU (`nvidia-smi`: GeForce GTX 1650 Ti, 4GB VRAM) rules out anything in the 27B+ class outright - it's the same hardware constraint behind this session's repeated Ollama GPU-OOM incidents with even a 7B model. `qwen2.5:14b-instruct` was pulled and live-verified on this hardware: ~39s cold load (likely partial CPU offload), ~4s warm inference thereafter - acceptable since evaluation runs are offline/batch, not on the live request path the other three judges (`judge_temperature`) sit on. Pinned to its own `evaluation_temperature=0.0`, not reusing `judge_temperature`, for the same reproducibility reasoning `generation_temperature` was already split out from `judge_temperature` for. |
 | Evaluation metric methodology | Retrieval precision & most of hallucination rate measured deterministically against a hand-curated ground-truth question set; only faithfulness (and the unfaithful-answer half of hallucination) goes through the LLM judge | Not everything in "retrieval precision, faithfulness, hallucination rate" needs a judge call. Retrieval precision is checkable directly against ground-truth expected source paths per question. A dedicated subset of questions is deliberately unanswerable from the eval corpus, so whether the system correctly returns the canonical fallback (vs. fabricating an answer) is also a direct check, not a judged one. Faithfulness - whether an answer's claims actually follow from what was cited - is the one dimension that's genuinely a judgment call, so only that (and un-caught fabrication on the "should be unanswerable" set) goes through `qwen2.5:14b-instruct`, reusing `orchestration/judge.py`'s existing `run_judge()`/`classify_verdict()` helpers rather than a fourth bespoke judge implementation. |
+| Real access-tier names | `employee < manager < director` (lowest → highest) | Resolves §14's prior open item. A chain-of-command model, not arbitrary placeholder labels - the ordered-list mechanism itself (§11) is unchanged, only the configured values are. |
 
 ## 14. Open Items (need a decision before the relevant phase starts)
 
-- **Real access-tier names**: the linear tier list is a placeholder (§11)
-  until the actual organizational roles are provided.
+None currently open.

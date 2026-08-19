@@ -16,6 +16,7 @@ from agentic_rag.loadtest.runner import (
     main,
     run_load_test,
 )
+from access_tiers import ACCESS_TIERS, TIER_EMPLOYEE, TIER_MANAGER
 
 # --- _next_batch --------------------------------------------------------
 
@@ -29,7 +30,7 @@ def test_next_batch_returns_up_to_batch_size_unstaged_files(tmp_path):
     staged = tmp_path / "staged"
     watched = tmp_path / "watched"
     for i in range(5):
-        _write(staged / "tier-1" / f"doc_{i:05d}.md")
+        _write(staged / TIER_EMPLOYEE / f"doc_{i:05d}.md")
 
     batch = _next_batch(staged, watched, batch_size=3)
 
@@ -39,9 +40,9 @@ def test_next_batch_returns_up_to_batch_size_unstaged_files(tmp_path):
 def test_next_batch_excludes_files_already_present_in_watched_dir(tmp_path):
     staged = tmp_path / "staged"
     watched = tmp_path / "watched"
-    _write(staged / "tier-1" / "doc_00000.md")
-    _write(staged / "tier-1" / "doc_00001.md")
-    _write(watched / "tier-1" / "doc_00000.md")
+    _write(staged / TIER_EMPLOYEE / "doc_00000.md")
+    _write(staged / TIER_EMPLOYEE / "doc_00001.md")
+    _write(watched / TIER_EMPLOYEE / "doc_00000.md")
 
     batch = _next_batch(staged, watched, batch_size=10)
 
@@ -51,8 +52,8 @@ def test_next_batch_excludes_files_already_present_in_watched_dir(tmp_path):
 def test_next_batch_returns_empty_when_everything_already_copied(tmp_path):
     staged = tmp_path / "staged"
     watched = tmp_path / "watched"
-    _write(staged / "tier-1" / "doc_00000.md")
-    _write(watched / "tier-1" / "doc_00000.md")
+    _write(staged / TIER_EMPLOYEE / "doc_00000.md")
+    _write(watched / TIER_EMPLOYEE / "doc_00000.md")
 
     batch = _next_batch(staged, watched, batch_size=10)
 
@@ -62,7 +63,7 @@ def test_next_batch_returns_empty_when_everything_already_copied(tmp_path):
 def test_next_batch_returns_empty_when_watched_dir_does_not_exist_yet(tmp_path):
     staged = tmp_path / "staged"
     watched = tmp_path / "does_not_exist"
-    _write(staged / "tier-1" / "doc_00000.md")
+    _write(staged / TIER_EMPLOYEE / "doc_00000.md")
 
     batch = _next_batch(staged, watched, batch_size=10)
 
@@ -72,11 +73,11 @@ def test_next_batch_returns_empty_when_watched_dir_does_not_exist_yet(tmp_path):
 def test_next_batch_preserves_tier_subfolder_structure(tmp_path):
     staged = tmp_path / "staged"
     watched = tmp_path / "watched"
-    _write(staged / "tier-2" / "doc_00000.md")
+    _write(staged / TIER_MANAGER / "doc_00000.md")
 
     batch = _next_batch(staged, watched, batch_size=10)
 
-    assert batch[0].relative_to(staged) == Path("tier-2") / "doc_00000.md"
+    assert batch[0].relative_to(staged) == Path(TIER_MANAGER) / "doc_00000.md"
 
 
 def test_next_batch_uses_the_given_staged_files_instead_of_rewalking_staged_dir(tmp_path):
@@ -86,12 +87,12 @@ def test_next_batch_uses_the_given_staged_files_instead_of_rewalking_staged_dir(
     # every call.
     staged = tmp_path / "staged"
     watched = tmp_path / "watched"
-    _write(staged / "tier-1" / "doc_00000.md")
+    _write(staged / TIER_EMPLOYEE / "doc_00000.md")
     # A file physically on disk but deliberately NOT included in the
     # given staged_files list must not appear in the result - proves the
     # list, not a fresh directory walk, is the actual source of truth.
-    _write(staged / "tier-1" / "doc_00001.md")
-    only_first = [staged / "tier-1" / "doc_00000.md"]
+    _write(staged / TIER_EMPLOYEE / "doc_00001.md")
+    only_first = [staged / TIER_EMPLOYEE / "doc_00000.md"]
 
     batch = _next_batch(staged, watched, batch_size=10, staged_files=only_first)
 
@@ -104,23 +105,23 @@ def test_next_batch_uses_the_given_staged_files_instead_of_rewalking_staged_dir(
 def test_copy_batch_copies_files_preserving_tier_subfolder_structure(tmp_path):
     staged = tmp_path / "staged"
     watched = tmp_path / "watched"
-    _write(staged / "tier-1" / "doc_00000.md", content="hello")
-    batch = [staged / "tier-1" / "doc_00000.md"]
+    _write(staged / TIER_EMPLOYEE / "doc_00000.md", content="hello")
+    batch = [staged / TIER_EMPLOYEE / "doc_00000.md"]
 
     _copy_batch(batch, staged, watched)
 
-    assert (watched / "tier-1" / "doc_00000.md").read_text() == "hello"
+    assert (watched / TIER_EMPLOYEE / "doc_00000.md").read_text() == "hello"
 
 
 def test_copy_batch_does_not_leave_a_leftover_temp_file_behind(tmp_path):
     staged = tmp_path / "staged"
     watched = tmp_path / "watched"
-    _write(staged / "tier-1" / "doc_00000.md", content="hello")
-    batch = [staged / "tier-1" / "doc_00000.md"]
+    _write(staged / TIER_EMPLOYEE / "doc_00000.md", content="hello")
+    batch = [staged / TIER_EMPLOYEE / "doc_00000.md"]
 
     _copy_batch(batch, staged, watched)
 
-    assert sorted(p.name for p in (watched / "tier-1").iterdir()) == ["doc_00000.md"]
+    assert sorted(p.name for p in (watched / TIER_EMPLOYEE).iterdir()) == ["doc_00000.md"]
 
 
 # --- _run_query_latency_phase ---------------------------------------------
@@ -131,7 +132,7 @@ def test_copy_batch_does_not_leave_a_leftover_temp_file_behind(tmp_path):
 def test_run_query_latency_phase_uses_a_fresh_semantic_cache_per_query(
     mock_semantic_cache, mock_answer, tmp_path
 ):
-    # Two representative queries share "tier-1" - a shared cache risks
+    # Two representative queries share TIER_EMPLOYEE - a shared cache risks
     # the second being served the first's cached answer if their
     # embeddings land close enough, recording a cache-lookup time instead
     # of a real round trip (the exact risk evaluation/runner.py's
@@ -158,10 +159,10 @@ def test_run_query_latency_phase_uses_a_fresh_semantic_cache_per_query(
 def test_run_query_latency_phase_validates_against_the_loadtest_access_tiers(
     mock_answer, tmp_path
 ):
-    # Not settings.access_tiers - the hardcoded tier-1/2/3 user_tier
-    # values in _REPRESENTATIVE_QUERIES must validate against the load
-    # test's own fixed tier layout regardless of what the main app's
-    # ACCESS_TIERS happens to be configured to.
+    # Not settings.access_tiers - the hardcoded employee/manager/director
+    # user_tier values in _REPRESENTATIVE_QUERIES must validate against
+    # the load test's own fixed tier layout regardless of what the main
+    # app's ACCESS_TIERS happens to be configured to.
     settings = Settings(
         watched_folder_path=tmp_path / "corpus",
         access_tiers=["custom-a", "custom-b"],
@@ -172,7 +173,7 @@ def test_run_query_latency_phase_validates_against_the_loadtest_access_tiers(
     _run_query_latency_phase(settings=settings, client=object())
 
     for call in mock_answer.call_args_list:
-        assert call.kwargs["known_tiers"] == ["tier-1", "tier-2", "tier-3"]
+        assert call.kwargs["known_tiers"] == ACCESS_TIERS
 
 
 # --- run_load_test --------------------------------------------------------
@@ -199,12 +200,12 @@ def _state(n: int = 1) -> FileState:
 
 
 def _snapshot_with(count: int) -> dict:
-    return {f"tier-1/doc_{i:05d}.md": _state(i) for i in range(count)}
+    return {f"employee/doc_{i:05d}.md": _state(i) for i in range(count)}
 
 
 def _sync_result(indexed_count=2) -> SyncCycleResult:
     return SyncCycleResult(
-        indexed=[f"tier-1/doc_{i:05d}.md" for i in range(indexed_count)],
+        indexed=[f"employee/doc_{i:05d}.md" for i in range(indexed_count)],
         deleted=[],
         ingestion_failures=[],
         indexing_failures=[],
@@ -227,7 +228,7 @@ def test_run_load_test_processes_every_staged_document_in_batches(
 ):
     settings = _settings(tmp_path)
     for i in range(5):
-        _write(settings.loadtest_corpus_staging_path / "tier-1" / f"doc_{i:05d}.md")
+        _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / f"doc_{i:05d}.md")
     # batch_size=2 over 5 staged files -> real batches of 2, 2, 1, then a
     # 4th, empty "confirming" cycle (see _index_one_batch's docstring for
     # why the loop can't stop the instant nothing is left to *copy*).
@@ -256,7 +257,7 @@ def test_run_load_test_reports_the_true_cumulative_total_from_the_final_snapshot
     # per-invocation indexed count - otherwise a resumed run's report
     # understates real progress toward the corpus target.
     settings = _settings(tmp_path)
-    _write(settings.loadtest_corpus_staging_path / "tier-1" / "doc_00000.md")
+    _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / "doc_00000.md")
     mock_sync_cycle.side_effect = [
         (_sync_result(1), _snapshot_with(6001)),  # 6000 already indexed by a prior run + 1 new
         _confirming_cycle(_snapshot_with(6001)),
@@ -276,7 +277,7 @@ def test_run_load_test_saves_a_snapshot_checkpoint_after_every_batch(
 ):
     settings = _settings(tmp_path)
     for i in range(4):
-        _write(settings.loadtest_corpus_staging_path / "tier-1" / f"doc_{i:05d}.md")
+        _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / f"doc_{i:05d}.md")
     mock_sync_cycle.side_effect = [
         (_sync_result(2), {"a": _state(1)}),
         (_sync_result(2), {"a": _state(1), "b": _state(2)}),
@@ -298,7 +299,7 @@ def test_run_load_test_only_indexes_against_the_dedicated_loadtest_collection(
     mock_sync_cycle, mock_query_phase, tmp_path
 ):
     settings = _settings(tmp_path)
-    _write(settings.loadtest_corpus_staging_path / "tier-1" / "doc_00000.md")
+    _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / "doc_00000.md")
     mock_sync_cycle.side_effect = [
         (_sync_result(1), _snapshot_with(1)),
         _confirming_cycle(_snapshot_with(1)),
@@ -318,8 +319,8 @@ def test_run_load_test_always_indexes_against_the_dedicated_loadtest_access_tier
     mock_sync_cycle, mock_query_phase, tmp_path
 ):
     # Not settings.access_tiers - a customized ACCESS_TIERS env var for
-    # the main app must not make the load test's own fixed tier-1/2/3
-    # corpus fail tagging.
+    # the main app must not make the load test's own fixed
+    # employee/manager/director corpus fail tagging.
     settings = Settings(
         watched_folder_path=tmp_path / "corpus",
         access_tiers=["custom-a", "custom-b"],
@@ -331,7 +332,7 @@ def test_run_load_test_always_indexes_against_the_dedicated_loadtest_access_tier
         loadtest_batch_size=2,
         _env_file=None,
     )
-    _write(settings.loadtest_corpus_staging_path / "tier-1" / "doc_00000.md")
+    _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / "doc_00000.md")
     mock_sync_cycle.side_effect = [
         (_sync_result(1), _snapshot_with(1)),
         _confirming_cycle(_snapshot_with(1)),
@@ -341,7 +342,7 @@ def test_run_load_test_always_indexes_against_the_dedicated_loadtest_access_tier
     run_load_test(settings=settings)
 
     cycle_settings = mock_sync_cycle.call_args_list[0].kwargs["settings"]
-    assert cycle_settings.access_tiers == ["tier-1", "tier-2", "tier-3"]
+    assert cycle_settings.access_tiers == ACCESS_TIERS
 
 
 @patch("agentic_rag.loadtest.runner._run_query_latency_phase")
@@ -350,17 +351,17 @@ def test_run_load_test_counts_ingestion_and_indexing_failures_separately(
     mock_sync_cycle, mock_query_phase, tmp_path
 ):
     settings = _settings(tmp_path)
-    _write(settings.loadtest_corpus_staging_path / "tier-1" / "doc_00000.md")
+    _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / "doc_00000.md")
     mock_sync_cycle.side_effect = [
         (
             SyncCycleResult(
                 indexed=[],
                 deleted=[],
                 ingestion_failures=[
-                    IngestionFailure(relative_path="tier-1/bad.md", reason="boom")
+                    IngestionFailure(relative_path="employee/bad.md", reason="boom")
                 ],
                 indexing_failures=[
-                    IngestionFailure(relative_path="tier-1/other.md", reason="oops")
+                    IngestionFailure(relative_path="employee/other.md", reason="oops")
                 ],
                 deletion_failures=[],
             ),
@@ -382,7 +383,7 @@ def test_run_load_test_records_query_latencies_from_the_post_load_phase(
     mock_sync_cycle, mock_query_phase, tmp_path
 ):
     settings = _settings(tmp_path)
-    _write(settings.loadtest_corpus_staging_path / "tier-1" / "doc_00000.md")
+    _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / "doc_00000.md")
     mock_sync_cycle.side_effect = [
         (_sync_result(1), _snapshot_with(1)),
         _confirming_cycle(_snapshot_with(1)),
@@ -403,14 +404,14 @@ def test_run_load_test_skips_the_query_latency_phase_when_nothing_is_indexed(
     # produce real-looking-but-meaningless latencies (fast "cannot
     # answer" fallbacks) and make a totally failed run look completed.
     settings = _settings(tmp_path)
-    _write(settings.loadtest_corpus_staging_path / "tier-1" / "doc_00000.md")
+    _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / "doc_00000.md")
     mock_sync_cycle.side_effect = [
         (
             SyncCycleResult(
                 indexed=[],
                 deleted=[],
                 ingestion_failures=[
-                    IngestionFailure(relative_path="tier-1/doc_00000.md", reason="boom")
+                    IngestionFailure(relative_path="employee/doc_00000.md", reason="boom")
                 ],
                 indexing_failures=[],
                 deletion_failures=[],
@@ -434,9 +435,9 @@ def test_run_load_test_resumes_without_recopying_already_watched_files(
     # Simulates a restart after a crash: one file is already present in
     # the loadtest watched folder from a prior (interrupted) run.
     settings = _settings(tmp_path)
-    _write(settings.loadtest_corpus_staging_path / "tier-1" / "doc_00000.md")
-    _write(settings.loadtest_corpus_staging_path / "tier-1" / "doc_00001.md")
-    _write(settings.loadtest_watched_folder_path / "tier-1" / "doc_00000.md")
+    _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / "doc_00000.md")
+    _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / "doc_00001.md")
+    _write(settings.loadtest_watched_folder_path / TIER_EMPLOYEE / "doc_00000.md")
     mock_sync_cycle.side_effect = [
         (_sync_result(1), _snapshot_with(1)),
         _confirming_cycle(_snapshot_with(1)),
@@ -460,8 +461,8 @@ def test_run_load_test_indexes_a_batch_stranded_on_the_final_cycle_by_a_prior_cr
     # _next_batch() alone would report zero remaining work; the run must
     # still index the stranded files rather than silently skipping them.
     settings = _settings(tmp_path)
-    _write(settings.loadtest_corpus_staging_path / "tier-1" / "doc_00000.md")
-    _write(settings.loadtest_watched_folder_path / "tier-1" / "doc_00000.md")
+    _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / "doc_00000.md")
+    _write(settings.loadtest_watched_folder_path / TIER_EMPLOYEE / "doc_00000.md")
     mock_sync_cycle.side_effect = [
         (_sync_result(1), _snapshot_with(1)),
         _confirming_cycle(_snapshot_with(1)),
@@ -485,7 +486,7 @@ def test_run_load_test_logs_a_running_cumulative_total_not_just_the_batch_count(
     # tailing the log can never see real progress toward 10,000.
     settings = _settings(tmp_path)
     for i in range(4):
-        _write(settings.loadtest_corpus_staging_path / "tier-1" / f"doc_{i:05d}.md")
+        _write(settings.loadtest_corpus_staging_path / TIER_EMPLOYEE / f"doc_{i:05d}.md")
     mock_sync_cycle.side_effect = [
         (_sync_result(2), {"a": _state(1)}),
         (_sync_result(2), {"a": _state(1), "b": _state(2)}),

@@ -1,6 +1,7 @@
 import itertools
 import json
 import logging
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -393,6 +394,27 @@ def test_query_logs_verdict_answered_with_citations_and_timings(tmp_path, mocks,
         "total",
     }
     assert all(v >= 0.0 for v in payload["timings_seconds"].values())
+
+
+def test_query_logs_a_valid_request_id(tmp_path, mocks, query_log):
+    with _client(tmp_path) as client:
+        client.post("/query", json={"query": "who won?", "user_tier": TIER_EMPLOYEE, "history": []})
+
+    payload = _log_payload(query_log)
+    # Raises ValueError if not a well-formed UUID - the actual contract
+    # log_query_request() promises, not just "some non-empty string".
+    uuid.UUID(payload["request_id"])
+
+
+def test_query_gives_two_separate_requests_distinct_request_ids(tmp_path, mocks, query_log):
+    with _client(tmp_path) as client:
+        client.post("/query", json={"query": "who won?", "user_tier": TIER_EMPLOYEE, "history": []})
+        client.post("/query", json={"query": "who won?", "user_tier": TIER_EMPLOYEE, "history": []})
+
+    assert len(query_log.records) == 2
+    first_id = json.loads(query_log.records[0].getMessage())["request_id"]
+    second_id = json.loads(query_log.records[1].getMessage())["request_id"]
+    assert first_id != second_id
 
 
 def test_query_logs_verdict_refused_injection_with_no_rewritten_query(tmp_path, mocks, query_log):

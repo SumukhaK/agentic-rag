@@ -2819,6 +2819,170 @@ building unwired infrastructure to fill the slot.
         explain when a test should import from them directly instead.
 
       Full suite after the fix pass: 518 passed, 0 failures.
+- [x] Qdrant backup + request correlation ID (own PR,
+      `feat/qdrant-backup-and-request-id`) — the user raised a batch of
+      operability questions (logging granularity, error handling,
+      rollback, "prompt caching," Qdrant backup, API versioning, request
+      logging), each investigated against the real current code before
+      deciding what (if anything) to build. Full discussion recorded in
+      `docs/REQUIREMENTS.md` §15 ("Miscellaneous Discussions") — not
+      duplicated here; this entry covers what was actually implemented.
+
+      **Confirmed already adequate, no change**: per-document error
+      isolation (already solid at 3 stages); the snapshot-revert-and-retry
+      mechanism (a real functional rollback for this architecture, just
+      not transactional); `EmbeddingCache`/`SemanticCache` (real, but not
+      "prompt caching" in the LLM-prefix-cache sense — Ollama doesn't
+      support that, and no code here attempts it).
+
+      **Deliberately deferred**: API versioning (`/v1/` etc.) — one
+      first-party client, no external consumers yet, would be speculative
+      infrastructure ahead of an actual need per `.claude/CLAUDE.md` §1.
+      Per-pipeline-stage failure logging (chunking/tagging/conversion
+      currently have zero logging calls of their own, only surfacing via
+      the aggregate `sync_cycle` log line) — a real, cheap follow-up,
+      flagged but not bundled into this PR.
+
+      **Implemented**:
+      - `indexing/backup.py` (new) — `backup_qdrant_storage()` copies
+        the embedded Qdrant storage directory to a timestamped
+        subdirectory (atomic: copy to a UUID-suffixed `.tmp` dir, then
+        `Path.replace()` into place), then prunes backups beyond
+        `qdrant_backup_retention_count`. Qdrant's own `create_snapshot()`
+        was checked first and confirmed to raise `NotImplementedError`
+        for local/embedded mode directly against the installed
+        `qdrant_client.local.qdrant_local.QdrantLocal` — this project
+        runs embedded mode specifically because Docker isn't available
+        (§5), so a filesystem copy is the only mechanism that actually
+        works here, not a design preference. Scoped deliberately to
+        whole-index loss, not single-document accidental deletion — the
+        watched folder is already the source of truth, so a
+        single-document Qdrant-side deletion self-heals on the next sync
+        cycle for free (see REQUIREMENTS.md §15 for the full reasoning
+        this scoping decision rests on).
+      - `observability/backup_log.py` (new) — `log_qdrant_backup()`/
+        `log_qdrant_backup_error()`, reusing `sync_log.py`'s own
+        `agentic_rag.ingestion.scheduler` logger (already configured at
+        app startup) rather than introducing a second `configure_*_
+        logging()` call for the same logger.
+      - `ingestion/scheduler.py` — `run_sync_loop()` now checks a backup
+        interval once per iteration (`qdrant_backup_interval_seconds`,
+        default 3600s — deliberately independent of `sync_interval_
+        seconds` and of whether a given cycle changed anything, so a
+        fully-quiescent corpus still gets backed up on a wall-clock
+        cadence). A failed backup is logged and the loop continues, the
+        same "an unanticipated failure in one concern must not take down
+        index freshness" reasoning already applied to a whole sync cycle
+        raising.
+      - `config.py` — new `qdrant_backup_path`, `qdrant_backup_interval_
+        seconds` (`gt=0`), `qdrant_backup_retention_count` (`gt=0` — a
+        retention count of 0 would prune every backup immediately after
+        creating it).
+      - `observability/request_log.py` — `log_query_request()` gained a
+        required `request_id` field; `api/routers/query.py` mints a
+        `uuid.uuid4()` once per request, before anything else runs, and
+        threads it through the one existing log call. Server-side only —
+        never accepted from the client, so it can't be spoofed. Kept
+        log-only, not added to `QueryResponse`'s schema — the gap raised
+        was specifically about correlating log lines, not a client-facing
+        contract change, and adding one would have been scope beyond
+        what was asked.
+
+      **Live-verified** (not just mocked): wrote a real point with a real
+      payload to a real embedded Qdrant collection, ran
+      `backup_qdrant_storage()` against it, then pointed a *fresh*
+      `QdrantClient` directly at the backup directory and successfully
+      read the exact point back — confirming the backup is a genuinely
+      restorable copy (this is also the actual documented restore
+      procedure, not a separate mechanism only tested in the abstract).
+
+      26 new tests (9 `indexing/backup.py`, 6 `observability/backup_log.py`,
+      4 scheduler backup-wiring, 4 new `config.py` settings, 2
+      `request_id` in `test_query.py`, 1 `request_id` distinguishing test
+      in `test_request_log.py`). Full suite: 544 passed, 0 failures.
+
+      **Self-review** (`/code-review` skill, high effort, 8 finder angles,
+      one duplicated by mistake — its findings folded in as extra
+      confirmation rather than discarded) found 4 real bugs in the backup
+      mechanism, all fixed before merge — the most serious of which meant
+      the feature would have silently never worked at all:
+
+      - **Critical**: `backup_qdrant_storage()`'s `shutil.copytree()`
+        tried to copy Qdrant's `.lock` file — which embedded/local Qdrant
+        holds an exclusive OS-level lock on for the entire life of the
+        app process. Reproduced directly: a real backup call against a
+        real, still-open `QdrantClient` (exactly how `run_sync_loop()`
+        actually calls it in production — the client is never closed
+        except at final app shutdown) raised `PermissionError` every
+        time. The original "live-verified" claim only tested backup
+        *after* closing the client first, which is not the real call
+        pattern and never exercised this path. Fixed by excluding
+        `.lock` from the copy (`shutil.ignore_patterns(".lock")`) —
+        Qdrant recreates it automatically on next open, live-verified
+        again, this time with the client correctly left open throughout,
+        and codified as a permanent regression test
+        (`test_backup_qdrant_storage_succeeds_while_a_live_client_still_
+        holds_the_storage_open`) plus a full write→backup→fresh-client-
+        read roundtrip test, closing the "no automated restorability
+        test" gap a separate finding also raised.
+      - The backup call inside `run_sync_loop()` wasn't shielded from
+        cancellation, unlike the sync cycle right next to it — 3
+        independent review angles converged on this and traced the exact
+        consequence: cancelling mid-backup would let the loop return
+        while the underlying OS thread keeps running `shutil.copytree()`/
+        `shutil.rmtree()`, racing against `api/app.py`'s `lifespan`
+        proceeding to `client.close()` on the same files — the identical
+        "use-after-close race" class of bug PR #46 already fixed for the
+        sync cycle, left unaddressed for the new backup call. Fixed by
+        applying the exact same `asyncio.shield()`/`except
+        asyncio.CancelledError` pattern, with a new test proving
+        cancellation genuinely waits for an in-flight backup to finish
+        before propagating (mirroring the existing cycle-side test).
+      - Failed backup attempts left orphaned `.tmp` directories on disk
+        forever — `list_backups()` deliberately excludes `.tmp` names (an
+        incomplete backup must never count as restorable), which also
+        meant `_prune_old_backups()` never saw them to clean them up, an
+        unbounded disk leak on repeated failures. Fixed: the temp
+        directory is now removed immediately if the copy raises, before
+        the exception propagates.
+      - The random `uuid` suffix only protected the *temporary* directory
+        name from a same-microsecond timestamp collision, not the actual
+        rename target (`final_path`) — the one place the collision would
+        really matter. Fixed by sharing one unique identifier between
+        both names, verified with a test that forces an identical
+        timestamp across two calls and confirms both still succeed with
+        genuinely distinct final names.
+      - Also fixed, lower severity: `_prune_old_backups()`'s
+        `backups[:-retention_count]` silently pruned *nothing* at
+        `retention_count == 0` instead of everything (`-0 == 0` in Python
+        slicing) — unreachable via `Settings` today (`Field(gt=0)`), but
+        the bare function itself had no such guarantee; and
+        `docs/REQUIREMENTS.md` §14 said "None currently open" while §15's
+        own text flagged an unactioned follow-up (per-pipeline-stage
+        logging) — added as a proper §14 item instead of leaving it only
+        discoverable by reading all of §15's prose.
+
+      Two findings were investigated and confirmed as real but
+      deliberately left as documented limitations rather than fixed in
+      this pass: `last_backup_time` resets on every process restart (an
+      in-memory value, not persisted), so a crash-loop shorter than the
+      backup interval could go an extended period without a real backup
+      ever completing; and restoring remains a fully manual, undocumented-
+      in-code operator procedure with no CLI tooling — the write path is
+      now well-tested, the restore path deliberately stays a human
+      decision, not an automated one, per this discussion's own earlier
+      conclusion that automatic corruption-detection-and-restore wasn't
+      being asked for.
+
+      One finding — bundling two independent features (backup, request
+      ID) into a single PR/branch, a genuine violation of `.claude/
+      CLAUDE.md`'s "never bundle multiple features into one PR" — was
+      confirmed accurate but not un-bundled retroactively: the user
+      explicitly asked for both together in the same request that
+      produced this branch.
+
+      7 new tests added during the fix pass. Full suite after fixes: 551
+      passed, 0 failures.
 
 ---
 

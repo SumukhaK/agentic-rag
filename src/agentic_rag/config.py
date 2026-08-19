@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 768
     qdrant_storage_path: Path = Path("./data/qdrant")
     qdrant_collection_name: str = "documents"
+    qdrant_backup_path: Path = Path("./data/qdrant_backups")
+    # Bounds backup I/O to a wall-clock cadence independent of
+    # sync_interval_seconds - copying the whole Qdrant storage directory
+    # on every ~60s sync cycle would be wasteful at any real corpus size;
+    # hourly is a starting point, not a tuned value.
+    qdrant_backup_interval_seconds: float = Field(default=3600.0, gt=0)
+    # gt=0: a retention count of 0 would mean "prune every backup
+    # immediately after creating it," which defeats the point of having
+    # one at all - not a real configuration this system should silently
+    # accept.
+    qdrant_backup_retention_count: int = Field(default=3, gt=0)
     sparse_embedding_model: str = "Qdrant/bm25"
     retrieval_top_k_candidates: int = 10
     reranker_model: str = "BAAI/bge-reranker-base"

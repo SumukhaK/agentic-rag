@@ -1,4 +1,5 @@
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 
@@ -164,7 +165,14 @@ def query(
     is the one case that isn't logged at all: a client input-validation
     failure (422) before any pipeline outcome exists to log, not one of
     the fixed `VERDICT_*` vocabulary's cases.
+
+    A fresh `request_id` (a UUID4) is minted for every call, before
+    anything else runs, and threaded through to that one log line - see
+    `log_query_request()`'s own docstring (`observability/request_log.py`)
+    for why: it's the only field that lets a reader tell two concurrent
+    requests' log lines apart.
     """
+    request_id = str(uuid.uuid4())
     request_start = time.monotonic()
     history_turns = len(payload.history)
     timings: dict[str, float] = {}
@@ -175,6 +183,7 @@ def query(
     def _log(verdict: str) -> None:
         timings["total"] = time.monotonic() - request_start
         log_query_request(
+            request_id=request_id,
             user_tier=payload.user_tier,
             query=payload.query,
             rewritten_query=rewritten_query,

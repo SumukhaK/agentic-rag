@@ -136,6 +136,37 @@ matters).
   orchestrator with separate liveness/readiness probes should route
   them to the two endpoints respectively).
 
+### Backup & recovery
+
+Qdrant runs in local/embedded mode here (no Docker in this dev
+environment), and its own snapshot API doesn't support that mode
+(`create_snapshot()` raises `NotImplementedError` for local Qdrant) — so
+the background sync loop periodically copies the whole embedded storage
+directory to a timestamped, rotated backup instead
+(`qdrant_backup_path`/`qdrant_backup_interval_seconds`/
+`qdrant_backup_retention_count`, default: hourly, keep the last 3). This
+is scoped to protect against *whole-index* loss (a corrupted on-disk
+store, a bad shutdown) — accidentally deleting a single document from the
+index is already cheap to recover from without a backup, since the
+watched folder, not Qdrant, is this system's source of truth (the next
+sync cycle just re-ingests that one file). See
+[`docs/REQUIREMENTS.md` §15](docs/REQUIREMENTS.md) for the full reasoning,
+including why a full rebuild specifically isn't a viable fallback at this
+project's target scale.
+
+**Restoring is a manual operator action, not automatic code**: stop the
+app, then point `qdrant_storage_path` at a chosen backup directory (or
+copy it over the live path) before restarting — the running process holds
+the live path open, so nothing can safely swap it out from underneath
+itself. Live-verified: a real point written to a real collection, backed
+up, then read back correctly by a fresh client pointed directly at the
+backup directory (the same mechanism restoring uses).
+
+Every `POST /query` request also gets a server-minted `request_id` (a
+UUID, never accepted from the client) threaded through its structured log
+line, so two concurrent requests' log output can be told apart and
+correlated — see `docs/REQUIREMENTS.md` §15 for what prompted this.
+
 ## Scaling to 150,000 Documents (Theoretical)
 
 `docs/REQUIREMENTS.md` §2 sets the system's actual target at **10,000

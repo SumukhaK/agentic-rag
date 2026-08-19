@@ -376,13 +376,15 @@ async def run_sync_loop(
   - **Whole-cycle failure handling:** it's rare for an entire cycle to raise, since every individual document/deletion failure is already isolated inside `run_sync_cycle()` — but if something unanticipated does escape (a bug, not a known transient error), it's caught broadly (`except Exception`, not a narrow list of specific expected error types) and logged rather than crashing the loop. The docstring contrasts this with a different function elsewhere in the codebase (`plan_and_retrieve()`'s retry loop) that deliberately narrows its exception catching to known-transient error types — but explains that pattern doesn't fit here, because that other loop is bounded (a handful of attempts before giving up with a fallback), while this loop runs unboundedly for the entire life of the process, so guarding against *any* unexpected failure matters more than trying to distinguish "worth retrying" cases from others. Nothing is silently swallowed either way — the real exception and traceback are still logged loudly via `log_sync_cycle_error()` at `ERROR` level; it just doesn't get to permanently kill index freshness for the rest of the process's life.
   - **Structured logging per cycle:** each cycle's duration is measured, and a structured JSON log line is emitted — but only when something actually happened (a change, or a failure), not on every single idle cycle, to avoid flooding the logs with a "nothing happened" line every `sync_interval_seconds` forever. A cycle that finished is logged via `log_sync_cycle()`; a cycle that raised entirely is logged via `log_sync_cycle_error()`.
 
-### Line 255 — Initializing the starting snapshot
+### Lines 272-273 — Initializing loop state before the loop starts
 ```python
     snapshot = initial_snapshot if initial_snapshot is not None else {}
+    last_backup_time = time.monotonic()
 ```
-- Sets the working `snapshot` variable to `initial_snapshot` if one was provided, or an empty dictionary otherwise — implementing the cold-start behavior described in the docstring. (Note: this local variable name `snapshot` shadows the imported `snapshot()` function from `watcher.py`, but that function is never called by name inside this particular function, so there's no actual conflict here.)
+- `snapshot = initial_snapshot if initial_snapshot is not None else {}` — sets the working `snapshot` variable to `initial_snapshot` if one was provided, or an empty dictionary otherwise — implementing the cold-start behavior described in the docstring. (Note: this local variable name `snapshot` shadows the imported `snapshot()` function from `watcher.py`, but that function is never called by name inside this particular function, so there's no actual conflict here.)
+- `last_backup_time = time.monotonic()` — records "now" as the starting point the backup-interval check (further down the loop) measures elapsed time against. Setting this *before* the loop begins, rather than leaving it unset until the first backup, means the very first backup only happens once a full `qdrant_backup_interval_seconds` has passed after the process starts — there's no urgent need to back up an index moments after startup.
 
-### Lines 256-267 — Starting one cycle as a shielded background task
+### Lines 274-285 — Starting one cycle as a shielded background task
 ```python
     while True:
         stop_event = threading.Event()
@@ -462,7 +464,48 @@ async def run_sync_loop(
 - `if (result.indexed or result.deleted or result.ingestion_failures or result.indexing_failures or result.deletion_failures):` — checks whether *anything at all* happened this cycle — any successful indexing, deletion, or any failure of any of the three kinds. If every one of these is empty, the cycle was a no-op (nothing changed on disk since last time), and per the docstring's stated intent, no log line is emitted for that case, to avoid flooding the logs with a repetitive "nothing happened" message every single interval forever.
 - `log_sync_cycle(...)` — if something did happen, logs a structured summary: counts of documents indexed, deleted, and failures of each of the three kinds, plus the *specific paths* that failed at each stage (so an operator reading the logs can see exactly which files need attention, not just how many), and how long the cycle took.
 
-### Line 306 — Sleeping until the next cycle
+### Lines 325-359 — Backing up Qdrant's storage on its own schedule
+```python
+        if time.monotonic() - last_backup_time >= settings.qdrant_backup_interval_seconds:
+            backup_start = time.monotonic()
+            backup_future = asyncio.ensure_future(
+                asyncio.to_thread(
+                    backup_qdrant_storage,
+                    settings.qdrant_storage_path,
+                    settings.qdrant_backup_path,
+                    retention_count=settings.qdrant_backup_retention_count,
+                )
+            )
+            try:
+                backup_path = await asyncio.shield(backup_future)
+            except asyncio.CancelledError:
+                await asyncio.shield(backup_future)
+                raise
+            except Exception as exc:  # noqa: BLE001 - a failed backup must not stall index freshness
+                log_qdrant_backup_error(
+                    error=f"{type(exc).__name__}: {exc}",
+                    duration_seconds=time.monotonic() - backup_start,
+                )
+            else:
+                log_qdrant_backup(
+                    backup_path=str(backup_path),
+                    duration_seconds=time.monotonic() - backup_start,
+                )
+            last_backup_time = time.monotonic()
+```
+This block runs every loop iteration (regardless of whether the sync cycle above found any changes, and regardless of whether it succeeded or raised), but the actual expensive work inside only happens rarely - see `indexing/backup.py` for the full reasoning behind why this exists (protecting against losing the whole search index, not a single document, since Qdrant's own backup feature doesn't work in the local/embedded mode this project runs).
+
+Note the `try`/`except asyncio.CancelledError`/`except Exception`/`else` shape here is deliberately the *same* shape used for the sync cycle above it (see "Lines 269-274 — Waiting for the cycle, shielded from cancellation" and "Lines 275-279 — Handling an entire cycle raising"). Self-review of this feature initially shipped without that `asyncio.shield()`/`CancelledError` handling at all - the backup call was just a plain `await asyncio.to_thread(...)` inside a `try`/`except Exception`. That's a real bug, not a style nit: an unshielded backup, cancelled mid-copy during app shutdown, would let this loop return immediately while the underlying OS thread keeps running `shutil.copytree()`/`shutil.rmtree()` in the background - racing against `api/app.py`'s `lifespan` proceeding to `client.close()` on the very same files that copy is still reading. The fix mirrors the cycle's own established pattern exactly, for the exact same reason.
+- `if time.monotonic() - last_backup_time >= settings.qdrant_backup_interval_seconds:` — checks whether enough real time has passed since the last backup attempt (successful or not) to warrant trying again. `last_backup_time` starts out set to the loop's own start time (see the line right before `while True:` above), so the very first backup only happens once a full interval has elapsed after startup, not immediately. This check is deliberately independent of `sync_interval_seconds` (the sync cycle's own, usually much shorter, cadence) — copying the whole Qdrant storage folder on every ~60-second sync tick would be wasteful I/O. (Known limitation, not fixed here: because `last_backup_time` is only ever an in-memory value, it resets on every process restart - a process stuck in a crash-loop shorter than the interval could go a long time without ever completing a real backup.)
+- `backup_start = time.monotonic()` — records when this specific backup attempt began, for timing.
+- `backup_future = asyncio.ensure_future(asyncio.to_thread(backup_qdrant_storage, ...))` — schedules the actual backup (`indexing/backup.py::backup_qdrant_storage()`) to run in a separate thread via `asyncio.to_thread()`, the same technique the sync cycle itself uses above — copying a potentially large folder is a slow, blocking filesystem operation, and running it directly on the event loop would freeze `POST /query` request handling (which shares this same process/event loop) for however long the copy takes. Wrapping it in `asyncio.ensure_future()` first (rather than awaiting the `to_thread()` call directly) is what makes it possible to hand this same in-progress operation to `asyncio.shield()` on the next line.
+- `try: backup_path = await asyncio.shield(backup_future)` — `asyncio.shield()` means that if *this* coroutine gets cancelled while waiting here, the cancellation doesn't propagate down into `backup_future` itself - the backup keeps running regardless.
+- `except asyncio.CancelledError: await asyncio.shield(backup_future); raise` — if cancellation does land here (app shutdown), this doesn't let the exception propagate immediately. It waits (still shielded, so this second wait can't itself be interrupted) for the real backup to actually finish first - discarding whatever it returns, since there's nothing meaningful left to do with it during a shutdown - and only then re-raises `CancelledError` to let the loop actually stop. This is what closes the use-after-close race described above.
+- `except Exception as exc: log_qdrant_backup_error(...)` — if the backup attempt raises for any other reason (disk full, a permissions problem, anything), it's caught and logged as an error rather than allowed to propagate — a failed backup must never take down the sync loop's actual job (keeping the index fresh), the same reasoning already applied above to a whole sync cycle raising.
+- `else: log_qdrant_backup(...)` — if the backup succeeded, logs its location and how long it took.
+- `last_backup_time = time.monotonic()` — reset regardless of success or failure, so a persistently-failing backup retries at the same interval cadence instead of being attempted again on every single loop tick (which would spam the logs and hammer the disk with repeated failures). Note this line is never reached on the cancellation path above, since `raise` there exits the function first - matching how the cycle's own cancellation path skips its equivalent bookkeeping too.
+
+### Line 346 — Sleeping until the next cycle
 ```python
         await asyncio.sleep(settings.sync_interval_seconds)
 ```

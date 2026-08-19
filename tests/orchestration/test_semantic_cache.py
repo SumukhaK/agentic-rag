@@ -1,7 +1,9 @@
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache
 from agentic_rag.orchestration.answer import AnswerResult, Citation
 from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE, PlanningResult
@@ -166,25 +168,17 @@ def test_cosine_similarity_is_clamped_to_the_valid_range():
 
 # --- answer_with_cache: pipeline composition --------------------------------
 
+# Every value below matches Settings' own defaults (config.py) - no field
+# needs overriding for these tests, so the fixture just documents which
+# defaults answer_with_cache() actually reads.
+TEST_SETTINGS = Settings(watched_folder_path=Path("/tmp/corpus"), _env_file=None)
+assert TEST_SETTINGS.embedding_model == MODEL
+
 KWARGS = dict(
     client=object(),
     collection_name="documents",
-    embedding_model=MODEL,
-    ollama_base_url="http://localhost:11434",
-    embedding_timeout_seconds=30,
-    sparse_model="Qdrant/bm25",
-    reranker_model="BAAI/bge-reranker-base",
-    generation_model="mistral",
-    generation_timeout_seconds=60,
-    generation_temperature=0.0,
-    decompose_temperature=0.0,
-    decompose_retry_temperature=0.4,
     known_tiers=[TIER_EMPLOYEE, TIER_MANAGER],
-    retrieval_top_k=10,
-    rerank_top_k=4,
-    max_attempts=5,
-    similarity_threshold=0.95,
-    ttl_seconds=300,
+    settings=TEST_SETTINGS,
 )
 
 

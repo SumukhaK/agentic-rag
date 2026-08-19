@@ -53,11 +53,12 @@ def run_sync_cycle(
 
     Takes `settings` directly rather than the dozen individual keyword
     arguments `index_document()`/`sync_folder()` each already take - the
-    same shape self-review flagged as worth avoiding for new code
-    (`answer_with_cache()`'s 19-parameter signature, PROJECT_TRACKER.md's
-    Phase 7 log): a typo'd kwarg name in a long hand-marshalled call is a
-    silent bug waiting to happen, not caught until the affected setting is
-    actually exercised.
+    same shape self-review originally flagged as worth avoiding for new
+    code (`answer_with_cache()`'s old 19-parameter signature,
+    PROJECT_TRACKER.md's Phase 7 log - since fixed by the same
+    `settings`-object pattern this function already used): a typo'd kwarg
+    name in a long hand-marshalled call is a silent bug waiting to happen,
+    not caught until the affected setting is actually exercised.
 
     A fresh `EmbeddingCache` is created per cycle, not shared across
     cycles - a deliberate choice, not the default, since

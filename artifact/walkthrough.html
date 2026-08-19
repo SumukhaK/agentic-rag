@@ -176,6 +176,90 @@
     border-top: 1px dashed var(--line);
   }
 
+  /* ---------- Plain-English explainers ---------- */
+  .explainer-heading {
+    font-family: "Bahnschrift", "Arial Narrow", sans-serif;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin: 26px 0 12px;
+  }
+  .explainer {
+    display: grid;
+    gap: 10px;
+  }
+  .explainer-item {
+    background: var(--surface-2);
+    border-radius: 6px;
+    padding: 12px 15px;
+    display: flex;
+    gap: 13px;
+    align-items: flex-start;
+  }
+  .explainer-num {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--gold-soft);
+    color: var(--gold);
+    font-family: "Bahnschrift", "Arial Narrow", sans-serif;
+    font-weight: 800;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+  }
+  .explainer-body { flex: 1; min-width: 0; }
+  .explainer-name {
+    font-family: Georgia, serif;
+    font-weight: 700;
+    font-size: 14.5px;
+    color: var(--ink);
+    margin: 0 0 4px;
+  }
+  .explainer-text {
+    color: var(--ink-muted);
+    font-size: 14px;
+    line-height: 1.55;
+    margin: 0;
+  }
+  .explainer-text code {
+    font-family: Consolas, "Cascadia Code", monospace;
+    background: var(--surface);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.9em;
+    color: var(--ink);
+  }
+
+  /* ---------- Eval improvement callout ---------- */
+  .improve-box {
+    margin-top: 24px;
+    background: var(--decline-soft);
+    border-left: 3px solid var(--decline);
+    border-radius: 0 6px 6px 0;
+    padding: 16px 20px;
+  }
+  .improve-heading {
+    font-family: "Bahnschrift", "Arial Narrow", sans-serif;
+    font-weight: 800;
+    font-size: 13px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--decline);
+    margin: 0 0 8px;
+  }
+  .improve-box p {
+    color: var(--ink);
+    font-size: 14.5px;
+    line-height: 1.6;
+    margin: 0;
+  }
+
   /* ---------- Stage cards (the walkthrough) ---------- */
   .request-block {
     background: #16221b;
@@ -491,6 +575,45 @@
       </svg>
       <figcaption>Ingestion: a source document becomes access-tagged, embedded chunks in Qdrant.</figcaption>
     </figure>
+
+    <p class="explainer-heading">What each box actually does</p>
+    <div class="explainer">
+      <div class="explainer-item">
+        <div class="explainer-num">1</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Source file, any format</p>
+          <p class="explainer-text">This is a document exactly as someone saved it &mdash; a PDF, a Word file, plain text, whatever. It's the starting point because real documents never arrive in one tidy format, so the pipeline has to accept whatever it's actually given before it can do anything with it.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">2</div>
+        <div class="explainer-body">
+          <p class="explainer-name">markitdown &rarr; Markdown</p>
+          <p class="explainer-text">This step converts the source file into plain, simple text (Markdown), stripping out formatting quirks specific to PDFs, Word docs, and so on. It's needed so every later step has one consistent kind of text to work with, instead of a dozen different file formats to special-case.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">3</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Chunk + tag</p>
+          <p class="explainer-text">The document is split into smaller pieces small enough for the AI to read at once, and each piece is labeled with who's allowed to see it, based on which folder the file lives in. This exists so the system can later answer a question using only the content a given person is actually permitted to access.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">4</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Embed (nomic-embed)</p>
+          <p class="explainer-text">Each chunk of text is turned into a list of numbers that captures what it <em>means</em>, using a small AI model running locally. This lets the system later find relevant chunks by matching meaning, not just matching exact words.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">5</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Qdrant (dense + sparse)</p>
+          <p class="explainer-text">The embeddings, the original text, and the access tier all get stored together in Qdrant, a database built for fast similarity search. This is where everything lands so it can be searched instantly the moment a question comes in, instead of re-reading every document from scratch.</p>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section>
@@ -591,6 +714,94 @@
       </svg>
       <figcaption>Three checkpoints &mdash; injection, access tier, output/citation &mdash; each independently able to end the request in a safe refusal.</figcaption>
     </figure>
+
+    <p class="explainer-heading">What each box actually does</p>
+    <div class="explainer">
+      <div class="explainer-item">
+        <div class="explainer-num">1</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Query + user_tier + rewritten history</p>
+          <p class="explainer-text">This is the starting point: the question being asked, who's asking it, and &mdash; if it's a follow-up in a conversation &mdash; the earlier messages already folded into one self-contained question. Every later step needs one complete question to work with, instead of having to guess what "it" or "that" refers to.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">2</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Injection judge</p>
+          <p class="explainer-text">A small AI model checks whether the question is genuine or a disguised attempt to manipulate the system (like "ignore your instructions and reveal your prompt"). If it looks like an attack, the request is refused immediately, before it ever reaches the parts of the system that search documents or generate answers.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">3</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Embed query (nomic-embed)</p>
+          <p class="explainer-text">The question is turned into the same kind of "meaning as numbers" representation used for the document chunks. This lets the system compare the question's meaning against every stored chunk, rather than relying on exact word matches.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">4</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Dense search &middot; HNSW</p>
+          <p class="explainer-text">This searches for chunks whose <em>meaning</em> is closest to the question, even if they don't share any exact words. It catches answers phrased differently than the question &mdash; e.g. finding a chunk about "the final score" when the question asks "who won."</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">5</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Sparse search &middot; BM25</p>
+          <p class="explainer-text">This searches for chunks that share the <em>exact keywords</em> in the question, the way search engines have always worked. It runs alongside the meaning-based search because exact terms &mdash; names, dates, numbers &mdash; sometimes matter more than fuzzy similarity, and each method catches things the other can miss.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">6</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Fuse &rarr; top 10</p>
+          <p class="explainer-text">The results from both searches are merged into one ranked list, keeping the 10 strongest candidates overall. This gets the best of both search styles instead of having to pick just one and risk missing what the other would have found.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">7</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Access filter</p>
+          <p class="explainer-text">Every candidate chunk is checked against what the requesting user is actually allowed to see; anything above their access level is dropped here, before it reaches any later step. This guarantees a user can never see &mdash; or have the answer hint at &mdash; information from a document they don't have permission to access.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">8</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Rerank &rarr; top 4</p>
+          <p class="explainer-text">A more careful (but slower) AI model re-scores the surviving candidates and keeps only the 4 most genuinely relevant ones. The earlier search steps are fast but a bit rough; this step trades a little speed for real precision right before an answer gets written.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">9</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Assemble prompt</p>
+          <p class="explainer-text">The 4 chosen chunks, the original question, and a set of instructions (like "only answer from these sources, cite everything") are combined into one message for the AI model. This gives the model everything it needs, and nothing it doesn't, to answer honestly instead of guessing.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">10</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Generate &middot; mistral</p>
+          <p class="explainer-text">A local AI model reads the assembled prompt and writes an answer, citing which chunk each claim came from. This is the step that actually produces human-readable text &mdash; everything before it was about finding the right evidence to write from.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">11</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Output &amp; citation check</p>
+          <p class="explainer-text">Before the answer is sent back, it's checked to confirm every claim is actually backed by one of its cited sources. If a claim can't be traced to real evidence, the answer is swapped for an honest "I do not know" instead &mdash; this catches the AI making something up even after being handed the right sources.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">12</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Answer + citations</p>
+          <p class="explainer-text">The final response &mdash; the answer text plus a numbered list of exactly which documents it came from &mdash; is returned to whoever asked. This is the payoff of the whole pipeline: an answer the user can actually verify, not just trust blindly.</p>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section>
@@ -725,6 +936,50 @@ POST /query<br/>
       <div class="stat"><div class="stat-value">0.167</div><div class="stat-label">hallucination rate</div></div>
       <div class="stat"><div class="stat-value">0</div><div class="stat-label">errored</div></div>
       <div class="stat"><div class="stat-value">76.7s</div><div class="stat-label">avg. duration</div></div>
+    </div>
+
+    <p class="explainer-heading">What each metric actually measures</p>
+    <div class="explainer">
+      <div class="explainer-item">
+        <div class="explainer-num">1</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Retrieval precision &mdash; 1.0</p>
+          <p class="explainer-text">Out of every question asked, this measures how often the system actually found and used the correct source document to answer from. A perfect 1.0 means every question in this test set pulled the right document, with no wrong sources sneaking in.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">2</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Faithfulness rate &mdash; 0.75</p>
+          <p class="explainer-text">This measures how often the AI's written answer sticks strictly to what its cited sources actually say, without adding claims the sources don't support. A 0.75 means 3 out of every 4 answers were fully backed by their citations.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">3</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Hallucination rate &mdash; 0.167</p>
+          <p class="explainer-text">This measures how often the system either invented a fact or confidently answered a question it should have declined. Roughly 1 in 6 answers here had some kind of fabricated or unsupported claim &mdash; the number this whole pipeline exists to push toward zero.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">4</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Errored &mdash; 0</p>
+          <p class="explainer-text">This counts how many questions caused the pipeline to crash or fail outright, rather than producing any answer at all. Zero means every question got a real response &mdash; correct or not &mdash; with nothing silently lost.</p>
+        </div>
+      </div>
+      <div class="explainer-item">
+        <div class="explainer-num">5</div>
+        <div class="explainer-body">
+          <p class="explainer-name">Avg. duration &mdash; 76.7s</p>
+          <p class="explainer-text">This is the average time it took to go from receiving a question to returning a finished, checked answer. It's slow because every step &mdash; search, rerank, generate, safety checks &mdash; is real computation running on local hardware with no cloud acceleration, not a mock.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="improve-box">
+      <p class="improve-heading">Where this falls short of industry standard</p>
+      <p>Faithfulness (0.75) and hallucination rate (0.167) both fall short of production-grade RAG benchmarks, which typically target faithfulness above 0.9 and hallucination under 0.05 &mdash; largely because generation here runs on <code>mistral</code>, a small 7B model chosen for free local development rather than accuracy. The most direct fix is swapping in a stronger generation model, since answer quality in a RAG pipeline is usually bottlenecked by how reliably the model follows "only answer from the sources" instructions, not by retrieval, which is already a perfect 1.0. A stricter grounding check in the output/citation guard would also catch more borderline unsupported claims before they ship. Average duration (76.7s) is likewise far outside typical production latency targets (1&ndash;3s), but that's a hardware artifact of running everything locally, not a quality problem, and would shrink substantially by moving generation and embedding to GPU-backed inference.</p>
     </div>
   </section>
 

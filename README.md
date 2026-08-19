@@ -33,32 +33,40 @@ evaluation run (also committed as a standalone copy in
 
 ```mermaid
 flowchart LR
-    DOC[Source documents\nany file type] --> MD[markitdown\n-> Markdown]
-    MD --> CHUNK[Hybrid chunking\nfixed size + boundary-aware]
-    CHUNK --> TAG[Access-level tagging]
-    TAG --> EMB[Embed chunks\nnomic-embed-text]
-    EMB --> QDRANT[(Qdrant\ndense + sparse, HNSW)]
+    DOC[Source documents\nany file type]:::process --> MD[markitdown\n-> Markdown]:::process
+    MD --> CHUNK[Hybrid chunking\nfixed size + boundary-aware]:::process
+    CHUNK --> TAG[Access-level tagging]:::process
+    TAG --> EMB[Embed chunks\nnomic-embed-text]:::process
+    EMB --> QDRANT[(Qdrant\ndense + sparse, HNSW)]:::store
+
+    classDef process fill:#1f5c3e,stroke:#16221b,stroke-width:1px,color:#eef3ee
+    classDef store fill:#16211b,stroke:#4fa377,stroke-width:2px,color:#eef3ee
 ```
 
 ### Query journey
 
 ```mermaid
 flowchart TD
-    U[Browser / UI\nuser query] --> ORCH[Orchestrator\nrewrite history + query]
-    ORCH --> INJ{Injection judge}
-    INJ -- flagged --> REFUSE[Refuse]
-    INJ -- clean --> EMBQ[Embed query\nnomic-embed-text]
-    EMBQ --> VEC[Vector search\nQdrant HNSW]
-    EMBQ --> KW[Keyword search\nBM25 / sparse, Qdrant hybrid]
-    VEC --> FUSE[Fuse results\n-> top 10]
+    U[Browser / UI\nuser query]:::process --> ORCH[Orchestrator\nrewrite history + query]:::process
+    ORCH --> INJ{Injection judge}:::guard
+    INJ -- flagged --> REFUSE[Refuse]:::decline
+    INJ -- clean --> EMBQ[Embed query\nnomic-embed-text]:::process
+    EMBQ --> VEC[Vector search\nQdrant HNSW]:::process
+    EMBQ --> KW[Keyword search\nBM25 / sparse, Qdrant hybrid]:::process
+    VEC --> FUSE[Fuse results\n-> top 10]:::process
     KW --> FUSE
-    FUSE --> ACL{Access control\nfilter}
-    ACL --> RERANK[Reranker\ncross-encoder -> top 4]
-    RERANK --> PROMPT[Assemble prompt\nchunks + rules + query]
-    PROMPT --> LLM[Generation LLM\nmistral via Ollama]
-    LLM --> OUTCHK{Output & citation\nsafety check}
-    OUTCHK -- fail --> IDK["I do not know the answer\nbased on indexed documents"]
-    OUTCHK -- pass --> ANSWER[Answer\nwith citations + access level]
+    FUSE --> ACL{Access control\nfilter}:::guard
+    ACL --> RERANK[Reranker\ncross-encoder -> top 4]:::process
+    RERANK --> PROMPT[Assemble prompt\nchunks + rules + query]:::process
+    PROMPT --> LLM[Generation LLM\nmistral via Ollama]:::process
+    LLM --> OUTCHK{Output & citation\nsafety check}:::guard
+    OUTCHK -- fail --> IDK["I do not know the answer\nbased on indexed documents"]:::decline
+    OUTCHK -- pass --> ANSWER[Answer\nwith citations + access level]:::success
+
+    classDef process fill:#1f5c3e,stroke:#16221b,stroke-width:1px,color:#eef3ee
+    classDef guard fill:#c98a2c,stroke:#8a5a1a,stroke-width:1px,color:#2a1c05
+    classDef decline fill:#8a3a2e,stroke:#5c241c,stroke-width:1px,color:#f6f7f1
+    classDef success fill:#e3a94a,stroke:#c98a2c,stroke-width:2px,color:#2a1c05
 ```
 
 Embedding and semantic caches sit alongside the embed/retrieval steps to keep

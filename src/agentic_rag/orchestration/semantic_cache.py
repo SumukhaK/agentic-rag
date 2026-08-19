@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from qdrant_client import QdrantClient
 
+from agentic_rag.config import Settings
 from agentic_rag.embedding.cache import EmbeddingCache, embed_query_dense
 from agentic_rag.orchestration.answer import AnswerResult, generate_answer
 from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE, plan_and_retrieve
@@ -132,23 +133,9 @@ def answer_with_cache(
     cache: SemanticCache,
     client: QdrantClient,
     collection_name: str,
-    embedding_model: str,
-    ollama_base_url: str,
-    embedding_timeout_seconds: int,
-    sparse_model: str,
     embedding_cache: EmbeddingCache,
-    reranker_model: str,
-    generation_model: str,
-    generation_timeout_seconds: int,
-    generation_temperature: float,
-    decompose_temperature: float,
-    decompose_retry_temperature: float,
     known_tiers: list[str],
-    retrieval_top_k: int,
-    rerank_top_k: int,
-    max_attempts: int,
-    similarity_threshold: float,
-    ttl_seconds: float,
+    settings: Settings,
 ) -> AnswerResult:
     """Answer `query` for `user_tier`, serving a cached answer for a
     semantically-similar past query at the same tier instead of re-running
@@ -159,6 +146,22 @@ def answer_with_cache(
     this is a multi-turn conversation) - caching operates on query meaning,
     which only makes sense once ambiguous references like "it"/"them" have
     already been resolved into an actual, comparable question.
+
+    `collection_name` and `known_tiers` stay explicit parameters rather
+    than being read off `settings` directly, since every real caller
+    deliberately points them at a different value than `settings`' own
+    defaults would give (`evaluation`/`loadtest` each index into their own
+    dedicated Qdrant collection, and the load test validates its
+    hardcoded query tiers against its own fixed corpus layout, not
+    whatever `settings.access_tiers` happens to be configured to - see
+    each caller for the specific reasoning). Every other tunable this
+    function needs is read straight off `settings` instead of being
+    accepted as its own parameter - self-review of `POST /query` (this
+    function's first real caller) found it hand-marshaling 17 individual
+    `Settings` fields into keyword arguments at the one call site, where a
+    typo'd kwarg name would be a silent `TypeError` at request time, not
+    at import time. Accepting `settings` directly moves that marshaling
+    into one place (here) instead of every caller.
 
     The embedding used for the cache lookup is `query`'s own dense
     embedding - distinct from what `plan_and_retrieve` computes for its
@@ -189,11 +192,11 @@ def answer_with_cache(
     "this is actually a non-answer" than the signal that led to generating
     it in the first place.
 
-    `generation_temperature` is threaded straight through to
+    `settings.generation_temperature` is threaded straight through to
     `generate_answer()` - see that function's docstring for why it's
     required and a separate setting from the judges' `judge_temperature`.
-    `decompose_temperature`/`decompose_retry_temperature` are threaded
-    straight through to `plan_and_retrieve()` - see its docstring
+    `settings.decompose_temperature`/`settings.decompose_retry_temperature` are
+    threaded straight through to `plan_and_retrieve()` - see its docstring
     (`planning.py`) for why decomposition needs two temperatures, not one,
     unlike every other pinned-temperature call in this codebase.
 
@@ -204,18 +207,18 @@ def answer_with_cache(
     """
     query_embedding = embed_query_dense(
         query,
-        model=embedding_model,
-        base_url=ollama_base_url,
-        timeout=embedding_timeout_seconds,
+        model=settings.embedding_model,
+        base_url=settings.ollama_base_url,
+        timeout=settings.embedding_timeout_seconds,
         cache=embedding_cache,
     )
 
     cached_answer = cache.get(
         query_embedding,
         user_tier,
-        embedding_model,
-        similarity_threshold=similarity_threshold,
-        ttl_seconds=ttl_seconds,
+        settings.embedding_model,
+        similarity_threshold=settings.semantic_cache_similarity_threshold,
+        ttl_seconds=settings.semantic_cache_ttl_seconds,
     )
     if cached_answer is not None:
         return cached_answer
@@ -224,32 +227,32 @@ def answer_with_cache(
         client,
         collection_name,
         query,
-        embedding_model=embedding_model,
-        ollama_base_url=ollama_base_url,
-        embedding_timeout_seconds=embedding_timeout_seconds,
-        sparse_model=sparse_model,
+        embedding_model=settings.embedding_model,
+        ollama_base_url=settings.ollama_base_url,
+        embedding_timeout_seconds=settings.embedding_timeout_seconds,
+        sparse_model=settings.sparse_embedding_model,
         embedding_cache=embedding_cache,
-        reranker_model=reranker_model,
-        generation_model=generation_model,
-        generation_timeout_seconds=generation_timeout_seconds,
-        decompose_temperature=decompose_temperature,
-        decompose_retry_temperature=decompose_retry_temperature,
+        reranker_model=settings.reranker_model,
+        generation_model=settings.generation_model,
+        generation_timeout_seconds=settings.generation_timeout_seconds,
+        decompose_temperature=settings.decompose_temperature,
+        decompose_retry_temperature=settings.decompose_retry_temperature,
         user_tier=user_tier,
         known_tiers=known_tiers,
-        retrieval_top_k=retrieval_top_k,
-        rerank_top_k=rerank_top_k,
-        max_attempts=max_attempts,
+        retrieval_top_k=settings.retrieval_top_k_candidates,
+        rerank_top_k=settings.rerank_top_k,
+        max_attempts=settings.max_retrieval_attempts,
     )
     answer = generate_answer(
         planning_result,
         query=query,
-        model=generation_model,
-        base_url=ollama_base_url,
-        timeout=generation_timeout_seconds,
-        temperature=generation_temperature,
+        model=settings.generation_model,
+        base_url=settings.ollama_base_url,
+        timeout=settings.generation_timeout_seconds,
+        temperature=settings.generation_temperature,
     )
 
     if planning_result.sufficient and CANNOT_ANSWER_MESSAGE not in answer.text:
-        cache.put(query_embedding, user_tier, embedding_model, answer)
+        cache.put(query_embedding, user_tier, settings.embedding_model, answer)
 
     return answer

@@ -796,14 +796,21 @@ building unwired infrastructure to fill the slot.
       as sub-question count grows (flagged by the efficiency review angle;
       needs a token-budgeting design decision, not a quick fix — noted here
       rather than guessed at)
-- [ ] Claude-as-evaluator wiring (offline eval, not in the live answer path) —
-      **deliberately deferred**: no `ANTHROPIC_API_KEY` is configured for this
-      project (checked — only Claude Code's own runtime auth exists, not
+- [x] Claude-as-evaluator wiring (offline eval, not in the live answer path) —
+      **deliberately deferred here**: no `ANTHROPIC_API_KEY` is configured for
+      this project (checked — only Claude Code's own runtime auth exists, not
       reusable for calling the Claude API from this project's Python code),
       and the detailed spec (retrieval precision, faithfulness, hallucination
       rate) lives under Phase 8's Structured Evaluation, not here — building
       it now without either the credential or the spec risked inventing
-      architecture Phase 8 would have to redo
+      architecture Phase 8 would have to redo. **Resolved differently in
+      Phase 8**, not left undone: the credential gap never closed, so the
+      user proposed a local open-weight model instead of Claude; local
+      `qwen2.5:14b-instruct` was pulled and live-verified, then adopted as
+      the evaluation judge (see Phase 8's Structured Evaluation entry and
+      `docs/REQUIREMENTS.md` §13's decision log). This box was left
+      unchecked for a while after that pivot landed — checked off now as a
+      docs-accuracy fix, no code change
 - [x] Semantic cache (query-meaning-keyed answer cache) — backend decided:
       **in-memory, linear cosine similarity** (recommended and chosen over a
       second Qdrant collection — consistent with `EmbeddingCache`'s existing
@@ -980,7 +987,14 @@ building unwired infrastructure to fill the slot.
       to watch during Phase 6 implementation, not a settled non-issue —
       see `docs/REQUIREMENTS.md` §13 for the one-line summary (the full
       reasoning lives here, not duplicated there)
-- [ ] Configurable linear access-tier model (§11) wired end-to-end
+- [x] Configurable linear access-tier model (§11) wired end-to-end —
+      **already done in Phase 3, not this phase**: `allowed_tiers_for()`
+      (`src/agentic_rag/retrieval/access.py`) resolves the tier list and
+      is applied inside `hybrid_search()` before fusion (FR3), verified
+      live there. Listed again here when this phase's checklist was first
+      drafted, then never checked off once the earlier Phase 3 work was
+      confirmed to already cover it — checked off now as a docs-accuracy
+      fix, no code change
 - [x] Prompt-injection LLM judge (local `mistral`, per the decision above)
       — screens incoming user queries for injection attempts before
       they're used in retrieval or generation (§12). **Implemented as**
@@ -1610,13 +1624,75 @@ building unwired infrastructure to fill the slot.
       `ONNXRuntimeError: bad allocation`, the same environmental issue
       behind `tests/retrieval/test_rerank.py`'s skips elsewhere in this
       log), not to anything in this fix.
-- [ ] Reduce `answer_with_cache()`'s 19-parameter signature — self-review
+- [x] Reduce `answer_with_cache()`'s 19-parameter signature — self-review
       noted `POST /query` (its first real caller) hand-marshals 17
       individual `Settings` fields into keyword arguments at the one call
       site; a typo'd kwarg name is a silent `TypeError` at request time,
-      not at import time. Consider accepting a config object (or
-      `Settings` itself) instead. Not addressed here — touches
-      already-merged Phase 5 code, not `POST /query`'s to redesign alone.
+      not at import time. Left as an explicitly deferred follow-up when
+      first found (own PR, `refactor/answer-with-cache-settings-param`),
+      picked up later.
+
+      **Fixed**: `answer_with_cache()` now takes `settings: Settings`
+      directly instead of 15 individually-named scalar parameters
+      (`embedding_model`, `ollama_base_url`, `generation_temperature`,
+      ... down to `ttl_seconds`) — each was read off `settings.X` at
+      every real call site anyway, under the exact same field name, so
+      there was nothing case-by-case for the caller to actually choose.
+      `collection_name` and `known_tiers` stay explicit parameters
+      instead of also collapsing into `settings` — deliberately, not an
+      oversight: every real caller already points them at a *different*
+      value than `settings`' own defaults would give (`evaluation`/
+      `loadtest` each index into their own dedicated Qdrant collection;
+      the load test validates its hardcoded query tiers against its own
+      fixed corpus layout, not whatever `settings.access_tiers` happens
+      to be configured to) — collapsing these two specifically would have
+      silently broken that intentional isolation. Net effect: 20
+      parameters (`query`, `user_tier` + 18 keyword-only) down to 8
+      (`query`, `user_tier` + `cache`, `client`, `collection_name`,
+      `embedding_cache`, `known_tiers`, `settings`). All 3 real callers
+      (`api/routers/query.py`, `evaluation/runner.py`,
+      `loadtest/runner.py`) updated to pass `settings=settings` instead
+      of re-marshaling 15 fields each — the exact typo-risk surface this
+      item was about shrinks from 3 call sites to 1 function body.
+      `tests/orchestration/test_semantic_cache.py`'s `KWARGS` fixture
+      rebuilt around a single `Settings(watched_folder_path=...)`
+      instance instead of 15 literal keys (every value it supplied
+      already matched `Settings`' own default, confirmed by an
+      assertion in the fixture itself).
+
+      **Self-review** (`/code-review` skill, high effort, 8 finder
+      angles) found 2 real gaps in the new tests, both fixed before
+      merge: (1) only 1 of the 15 collapsed fields was actually
+      self-verified against the old hardcoded values, leaving 14 that
+      could silently drift via a stray environment variable (`_env_file
+      =None` only disables `.env` loading — `pydantic-settings` still
+      reads matching OS environment variables) or a future `config.py`
+      default change with nothing to catch it — expanded the assertion
+      to cover every field the function actually reads. (2) the internal
+      `plan_and_retrieve()`/`generate_answer()` calls inside
+      `answer_with_cache()`'s own body were mocked with a bare `@patch`
+      (no `autospec`), so a typo'd kwarg in that internal marshaling —
+      the same class of bug this whole refactor exists to prevent, just
+      relocated one level deeper — would have passed every test and only
+      surfaced against a real request in production. Added
+      `autospec=True` to both patches; all 19 tests in the file still
+      pass, confirming no such typo actually exists today, and closing
+      the gap for the next one. Also fixed a docstring inconsistency
+      (one of two `decompose_*_temperature` references was missing its
+      `settings.` prefix). Two other findings — `plan_and_retrieve()`
+      itself still has the same many-parameter shape this PR fixed on
+      `answer_with_cache()` (the marshaling risk moved rather than
+      vanished, now mitigated by the `autospec` fix above instead of by
+      the signature itself), and `Settings` bundling one collection-name
+      field per deployment mode (prod/eval/loadtest) as a deeper design
+      question — were confirmed real but left as out-of-scope follow-ups
+      rather than expanded into this PR, per this repo's own "never
+      invent architecture" principle.
+
+      Full suite after the fix pass: 518 passed, 0 failures — no
+      behavior change, confirmed by every existing test (including the
+      mocked-boundary router/eval/loadtest tests, which don't touch this
+      function's internals at all) passing unmodified.
 - [x] OpenAPI docs kept accurate — own PR, `feat/openapi-docs-accuracy`.
       Neither `docs/REQUIREMENTS.md` nor this repo's `.claude/CLAUDE.md`
       mandate a specific error-response shape or a standalone

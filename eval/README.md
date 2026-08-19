@@ -30,10 +30,10 @@ access tiers the pipeline actually enforces:
 
 | File | Tier | Content |
 |---|---|---|
-| `tier-1/derby.md` | tier-1 | Arsenal beat Tottenham 3-1 in the North London Derby (15 Mar 2025); Saka scored twice, Ødegaard once, Son for Spurs |
-| `tier-1/transfer.md` | tier-1 | Chelsea signed Moises Caicedo from Brighton for £115M in January 2024, contract until 2031 |
-| `tier-2/injury-report.md` | tier-2 | Kevin De Bruyne suffered a hamstring injury during training on 10 Feb 2025, out for six weeks |
-| `tier-2/contract.md` | tier-2 | Erling Haaland extended his Manchester City contract until 2034 (announced May 2024) |
+| `employee/derby.md` | employee | Arsenal beat Tottenham 3-1 in the North London Derby (15 Mar 2025); Saka scored twice, Ødegaard once, Son for Spurs |
+| `employee/transfer.md` | employee | Chelsea signed Moises Caicedo from Brighton for £115M in January 2024, contract until 2031 |
+| `manager/injury-report.md` | manager | Kevin De Bruyne suffered a hamstring injury during training on 10 Feb 2025, out for six weeks |
+| `manager/contract.md` | manager | Erling Haaland extended his Manchester City contract until 2034 (announced May 2024) |
 
 Deliberately small and hand-written: the point is a corpus whose ground truth
 a human can verify by reading it in thirty seconds, not a realistic-scale
@@ -47,12 +47,12 @@ declines instead of guessing.
 
 | ID | Query | Tier | Expected answerable? | Expected source |
 |---|---|---|---|---|
-| `q1-derby-score` | Who won the north London derby between Arsenal and Tottenham, and what was the score? | tier-1 | Yes | `tier-1/derby.md` |
-| `q2-caicedo-fee` | How much did Chelsea pay to sign Moises Caicedo from Brighton? | tier-1 | Yes | `tier-1/transfer.md` |
-| `q3-debruyne-injury` | What injury did Kevin De Bruyne suffer, and when? | tier-2 | Yes | `tier-2/injury-report.md` |
-| `q4-haaland-contract` | Until what year did Erling Haaland extend his contract with Manchester City? | tier-2 | Yes | `tier-2/contract.md` |
-| `q5-unanswerable-world-cup` | Who won the FIFA World Cup in 1998? | tier-1 | No — not in the corpus | — |
-| `q6-unanswerable-messi-transfer` | What was Lionel Messi's transfer fee when he joined Inter Miami? | tier-2 | No — not in the corpus | — |
+| `q1-derby-score` | Who won the north London derby between Arsenal and Tottenham, and what was the score? | employee | Yes | `employee/derby.md` |
+| `q2-caicedo-fee` | How much did Chelsea pay to sign Moises Caicedo from Brighton? | employee | Yes | `employee/transfer.md` |
+| `q3-debruyne-injury` | What injury did Kevin De Bruyne suffer, and when? | manager | Yes | `manager/injury-report.md` |
+| `q4-haaland-contract` | Until what year did Erling Haaland extend his contract with Manchester City? | manager | Yes | `manager/contract.md` |
+| `q5-unanswerable-world-cup` | Who won the FIFA World Cup in 1998? | employee | No — not in the corpus | — |
+| `q6-unanswerable-messi-transfer` | What was Lionel Messi's transfer fee when he joined Inter Miami? | manager | No — not in the corpus | — |
 
 ## What each metric means
 

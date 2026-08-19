@@ -3,14 +3,15 @@ import pytest
 from agentic_rag.ingestion.chunker import Chunk
 from agentic_rag.ingestion.pipeline import IngestedDocument
 from agentic_rag.ingestion.validation import DocumentValidationError, validate_document
+from tests.access_tiers import TIER_EMPLOYEE
 
 
 def _document(**overrides):
     defaults = dict(
-        relative_path="tier-1/a.txt",
+        relative_path="employee/a.txt",
         markdown="Arsenal drew 1-1.",
         chunks=[Chunk(text="Arsenal drew 1-1.", index=0)],
-        access_tier="tier-1",
+        access_tier=TIER_EMPLOYEE,
     )
     defaults.update(overrides)
     return IngestedDocument(**defaults)

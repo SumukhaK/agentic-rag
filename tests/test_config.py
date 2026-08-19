@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentic_rag.config import Settings
+from tests.access_tiers import ACCESS_TIERS
 
 
 def test_settings_loads_watched_folder_path_from_env(monkeypatch):
@@ -45,7 +46,7 @@ def test_settings_defaults_access_tiers(monkeypatch):
 
     settings = Settings()
 
-    assert settings.access_tiers == ["tier-1", "tier-2", "tier-3"]
+    assert settings.access_tiers == ACCESS_TIERS
 
 
 def test_settings_access_tiers_overridable_from_env(monkeypatch):

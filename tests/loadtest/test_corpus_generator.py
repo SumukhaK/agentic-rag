@@ -6,6 +6,7 @@ from agentic_rag.loadtest.corpus_generator import (
     _tier_for_index,
     generate_corpus,
 )
+from tests.access_tiers import ACCESS_TIERS, TIER_DIRECTOR, TIER_EMPLOYEE, TIER_MANAGER
 
 
 def test_generate_document_text_length_is_approximately_pages_times_chars_per_page():
@@ -65,25 +66,27 @@ def test_generate_document_text_has_no_duplicate_windows_across_documents():
 
 
 def test_tier_for_index_splits_documents_evenly_across_tiers():
-    tiers = ["tier-1", "tier-2", "tier-3"]
     document_count = 9
 
-    assignments = [_tier_for_index(i, document_count, tiers) for i in range(document_count)]
+    assignments = [
+        _tier_for_index(i, document_count, ACCESS_TIERS) for i in range(document_count)
+    ]
 
-    assert assignments.count("tier-1") == 3
-    assert assignments.count("tier-2") == 3
-    assert assignments.count("tier-3") == 3
+    assert assignments.count(TIER_EMPLOYEE) == 3
+    assert assignments.count(TIER_MANAGER) == 3
+    assert assignments.count(TIER_DIRECTOR) == 3
 
 
 def test_tier_for_index_handles_a_count_not_evenly_divisible_by_tier_count():
-    tiers = ["tier-1", "tier-2", "tier-3"]
     document_count = 10
 
-    assignments = [_tier_for_index(i, document_count, tiers) for i in range(document_count)]
+    assignments = [
+        _tier_for_index(i, document_count, ACCESS_TIERS) for i in range(document_count)
+    ]
 
     # Every index must land in a real tier - no assignment falls off the
     # end when document_count isn't a multiple of len(tiers).
-    assert all(tier in tiers for tier in assignments)
+    assert all(tier in ACCESS_TIERS for tier in assignments)
     assert len(assignments) == document_count
 
 
@@ -92,7 +95,7 @@ def test_generate_corpus_writes_the_requested_number_of_documents(tmp_path: Path
         tmp_path,
         document_count=6,
         pages_per_document=1,
-        access_tiers=["tier-1", "tier-2", "tier-3"],
+        access_tiers=ACCESS_TIERS,
         seed=0,
     )
 
@@ -105,13 +108,13 @@ def test_generate_corpus_distributes_documents_across_tier_subfolders(tmp_path: 
         tmp_path,
         document_count=6,
         pages_per_document=1,
-        access_tiers=["tier-1", "tier-2", "tier-3"],
+        access_tiers=ACCESS_TIERS,
         seed=0,
     )
 
-    assert len(list((tmp_path / "tier-1").glob("*.md"))) == 2
-    assert len(list((tmp_path / "tier-2").glob("*.md"))) == 2
-    assert len(list((tmp_path / "tier-3").glob("*.md"))) == 2
+    assert len(list((tmp_path / TIER_EMPLOYEE).glob("*.md"))) == 2
+    assert len(list((tmp_path / TIER_MANAGER).glob("*.md"))) == 2
+    assert len(list((tmp_path / TIER_DIRECTOR).glob("*.md"))) == 2
 
 
 def test_generate_corpus_is_reproducible_from_the_same_seed(tmp_path: Path):

@@ -3,6 +3,7 @@ import json
 import pytest
 
 from agentic_rag.evaluation.questions import EvalQuestion, load_questions
+from tests.access_tiers import TIER_EMPLOYEE
 
 
 def _write(path, payload):
@@ -17,9 +18,9 @@ def test_load_questions_parses_an_answerable_question(tmp_path):
             {
                 "id": "q1",
                 "query": "Who won the derby?",
-                "user_tier": "tier-1",
+                "user_tier": TIER_EMPLOYEE,
                 "expected_answerable": True,
-                "expected_source_paths": ["tier-1/derby.md"],
+                "expected_source_paths": ["employee/derby.md"],
             }
         ],
     )
@@ -30,9 +31,9 @@ def test_load_questions_parses_an_answerable_question(tmp_path):
         EvalQuestion(
             id="q1",
             query="Who won the derby?",
-            user_tier="tier-1",
+            user_tier=TIER_EMPLOYEE,
             expected_answerable=True,
-            expected_source_paths=["tier-1/derby.md"],
+            expected_source_paths=["employee/derby.md"],
         )
     ]
 
@@ -47,7 +48,7 @@ def test_load_questions_defaults_expected_source_paths_to_empty(tmp_path):
             {
                 "id": "q2",
                 "query": "Who won the 1850 derby?",
-                "user_tier": "tier-1",
+                "user_tier": TIER_EMPLOYEE,
                 "expected_answerable": False,
             }
         ],
@@ -63,9 +64,9 @@ def test_load_questions_preserves_file_order(tmp_path):
     _write(
         path,
         [
-            {"id": "a", "query": "?", "user_tier": "tier-1", "expected_answerable": True,
+            {"id": "a", "query": "?", "user_tier": TIER_EMPLOYEE, "expected_answerable": True,
              "expected_source_paths": ["x"]},
-            {"id": "b", "query": "?", "user_tier": "tier-1", "expected_answerable": True,
+            {"id": "b", "query": "?", "user_tier": TIER_EMPLOYEE, "expected_answerable": True,
              "expected_source_paths": ["y"]},
         ],
     )
@@ -80,9 +81,9 @@ def test_load_questions_rejects_a_duplicate_id(tmp_path):
     _write(
         path,
         [
-            {"id": "a", "query": "?", "user_tier": "tier-1", "expected_answerable": True,
+            {"id": "a", "query": "?", "user_tier": TIER_EMPLOYEE, "expected_answerable": True,
              "expected_source_paths": ["x"]},
-            {"id": "a", "query": "??", "user_tier": "tier-1", "expected_answerable": True,
+            {"id": "a", "query": "??", "user_tier": TIER_EMPLOYEE, "expected_answerable": True,
              "expected_source_paths": ["y"]},
         ],
     )
@@ -103,7 +104,7 @@ def test_load_questions_rejects_an_answerable_question_with_no_expected_sources(
             {
                 "id": "q1",
                 "query": "Who won?",
-                "user_tier": "tier-1",
+                "user_tier": TIER_EMPLOYEE,
                 "expected_answerable": True,
                 "expected_source_paths": [],
             }
@@ -128,9 +129,9 @@ def test_load_questions_rejects_an_unanswerable_question_with_expected_sources(t
             {
                 "id": "q1",
                 "query": "Who won the 1850 derby?",
-                "user_tier": "tier-1",
+                "user_tier": TIER_EMPLOYEE,
                 "expected_answerable": False,
-                "expected_source_paths": ["tier-1/derby.md"],
+                "expected_source_paths": ["employee/derby.md"],
             }
         ],
     )

@@ -28,6 +28,7 @@ from agentic_rag.ingestion.pipeline import IngestionFailure
 from agentic_rag.ingestion.scheduler import SyncCycleResult
 from agentic_rag.orchestration.answer import AnswerResult, Citation
 from agentic_rag.orchestration.planning import CANNOT_ANSWER_MESSAGE
+from tests.access_tiers import TIER_EMPLOYEE
 
 SPARSE_MODEL = "Qdrant/bm25"
 COLLECTION = "eval_documents"
@@ -59,9 +60,9 @@ def _question(**overrides) -> EvalQuestion:
     defaults = dict(
         id="q1",
         query="Who won the derby?",
-        user_tier="tier-1",
+        user_tier=TIER_EMPLOYEE,
         expected_answerable=True,
-        expected_source_paths=["tier-1/derby.md"],
+        expected_source_paths=["employee/derby.md"],
     )
     defaults.update(overrides)
     return EvalQuestion(**defaults)
@@ -78,9 +79,9 @@ def _dummy_result(question_id="q1", error=None) -> EvalQuestionResult:
         question_id=question_id,
         query="q",
         expected_answerable=True,
-        expected_source_paths=["tier-1/a.md"],
+        expected_source_paths=["employee/a.md"],
         answer_text="a",
-        cited_paths=["tier-1/a.md"],
+        cited_paths=["employee/a.md"],
         retrieval_hit=True,
         answered=True,
         faithfulness=FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN"),
@@ -97,7 +98,7 @@ def test_fetch_cited_source_text_returns_the_indexed_chunk_text(tmp_path):
     client = get_client(tmp_path / "qdrant")
     ensure_collection(client, collection_name=COLLECTION, vector_size=3)
     citation = Citation(
-        number=1, relative_path="tier-1/derby.md", chunk_index=0, access_tier="tier-1"
+        number=1, relative_path="employee/derby.md", chunk_index=0, access_tier=TIER_EMPLOYEE
     )
     client.upsert(
         collection_name=COLLECTION,
@@ -109,10 +110,10 @@ def test_fetch_cited_source_text_returns_the_indexed_chunk_text(tmp_path):
                     SPARSE_VECTOR_NAME: SparseVector(indices=[], values=[]),
                 },
                 payload={
-                    "relative_path": "tier-1/derby.md",
+                    "relative_path": "employee/derby.md",
                     "chunk_index": 0,
                     "text": "Arsenal beat Chelsea 3-0.",
-                    "access_tier": "tier-1",
+                    "access_tier": TIER_EMPLOYEE,
                 },
             )
         ],
@@ -126,7 +127,7 @@ def test_fetch_cited_source_text_returns_the_indexed_chunk_text(tmp_path):
 def test_fetch_cited_source_text_returns_empty_when_the_chunk_is_missing(tmp_path):
     client = get_client(tmp_path / "qdrant")
     ensure_collection(client, collection_name=COLLECTION, vector_size=3)
-    citation = Citation(number=1, relative_path="tier-1/nope.md", chunk_index=0, access_tier="tier-1")
+    citation = Citation(number=1, relative_path="employee/nope.md", chunk_index=0, access_tier=TIER_EMPLOYEE)
 
     text = _fetch_cited_source_text(client, COLLECTION, citation)
 
@@ -144,7 +145,7 @@ def test_run_question_marks_a_retrieval_hit_when_an_expected_source_is_cited(
 ):
     mock_answer.return_value = AnswerResult(
         text="Arsenal won [1].",
-        citations=[Citation(number=1, relative_path="tier-1/derby.md", chunk_index=0, access_tier="tier-1")],
+        citations=[Citation(number=1, relative_path="employee/derby.md", chunk_index=0, access_tier=TIER_EMPLOYEE)],
     )
     mock_fetch_text.return_value = "Arsenal beat Chelsea 3-0."
     mock_faithfulness.return_value = FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN")
@@ -166,7 +167,7 @@ def test_run_question_marks_a_retrieval_miss_when_no_expected_source_is_cited(
 ):
     mock_answer.return_value = AnswerResult(
         text="Chelsea won [1].",
-        citations=[Citation(number=1, relative_path="tier-1/wrong.md", chunk_index=0, access_tier="tier-1")],
+        citations=[Citation(number=1, relative_path="employee/wrong.md", chunk_index=0, access_tier=TIER_EMPLOYEE)],
     )
     mock_fetch_text.return_value = "some other text"
     mock_faithfulness.return_value = FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN")
@@ -189,7 +190,7 @@ def test_run_question_normalizes_windows_path_separators_before_comparing(
     mock_answer.return_value = AnswerResult(
         text="Arsenal won [1].",
         citations=[
-            Citation(number=1, relative_path="tier-1\\derby.md", chunk_index=0, access_tier="tier-1")
+            Citation(number=1, relative_path="employee\\derby.md", chunk_index=0, access_tier=TIER_EMPLOYEE)
         ],
     )
     mock_faithfulness.return_value = FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN")
@@ -197,7 +198,7 @@ def test_run_question_normalizes_windows_path_separators_before_comparing(
 
     with patch("agentic_rag.evaluation.runner._fetch_cited_source_text", return_value="text"):
         result = _run_question(
-            _question(expected_source_paths=["tier-1/derby.md"]),
+            _question(expected_source_paths=["employee/derby.md"]),
             settings=settings,
             client=object(),
             embedding_cache=object(),
@@ -283,7 +284,7 @@ def test_run_question_marks_hallucinated_when_the_answer_is_judged_unfaithful(
 ):
     mock_answer.return_value = AnswerResult(
         text="Arsenal won 5-0 [1].",
-        citations=[Citation(number=1, relative_path="tier-1/derby.md", chunk_index=0, access_tier="tier-1")],
+        citations=[Citation(number=1, relative_path="employee/derby.md", chunk_index=0, access_tier=TIER_EMPLOYEE)],
     )
     mock_fetch_text.return_value = "Arsenal beat Chelsea 3-0."
     mock_faithfulness.return_value = FaithfulnessCheckResult(
@@ -361,7 +362,7 @@ def test_run_question_records_the_duration_of_a_successful_run(
     # the wrong pair of timestamps.
     mock_answer.return_value = AnswerResult(
         text="Arsenal won [1].",
-        citations=[Citation(number=1, relative_path="tier-1/derby.md", chunk_index=0, access_tier="tier-1")],
+        citations=[Citation(number=1, relative_path="employee/derby.md", chunk_index=0, access_tier=TIER_EMPLOYEE)],
     )
     mock_fetch_text.return_value = "Arsenal beat Chelsea 3-0."
     mock_faithfulness.return_value = FaithfulnessCheckResult(is_faithful=True, raw_judge_response="CLEAN")

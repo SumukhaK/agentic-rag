@@ -43,8 +43,8 @@ def test_log_loadtest_batch_message_is_valid_json_with_expected_fields(caplog):
             indexed_count=198,
             ingestion_failure_count=1,
             indexing_failure_count=1,
-            ingestion_failure_paths=["tier-1/doc_00500.md"],
-            indexing_failure_paths=["tier-2/doc_00601.md"],
+            ingestion_failure_paths=["employee/doc_00500.md"],
+            indexing_failure_paths=["manager/doc_00601.md"],
             duration_seconds=2050.5,
             cumulative_indexed=798,
             cumulative_elapsed_seconds=8300.0,
@@ -58,8 +58,8 @@ def test_log_loadtest_batch_message_is_valid_json_with_expected_fields(caplog):
     assert payload["indexed_count"] == 198
     assert payload["ingestion_failure_count"] == 1
     assert payload["indexing_failure_count"] == 1
-    assert payload["ingestion_failure_paths"] == ["tier-1/doc_00500.md"]
-    assert payload["indexing_failure_paths"] == ["tier-2/doc_00601.md"]
+    assert payload["ingestion_failure_paths"] == ["employee/doc_00500.md"]
+    assert payload["indexing_failure_paths"] == ["manager/doc_00601.md"]
     assert payload["duration_seconds"] == 2050.5
     assert payload["cumulative_indexed"] == 798
     assert payload["cumulative_elapsed_seconds"] == 8300.0
@@ -75,14 +75,14 @@ def test_log_loadtest_batch_includes_failure_paths_not_just_counts():
 
     _log_loadtest_batch(
         ingestion_failure_count=1,
-        ingestion_failure_paths=["tier-1/doc_00013.md"],
+        ingestion_failure_paths=["employee/doc_00013.md"],
         indexing_failure_count=1,
-        indexing_failure_paths=["tier-1/doc_00042.md"],
+        indexing_failure_paths=["employee/doc_00042.md"],
     )
 
     payload = json.loads(stream.getvalue().strip())
-    assert payload["ingestion_failure_paths"] == ["tier-1/doc_00013.md"]
-    assert payload["indexing_failure_paths"] == ["tier-1/doc_00042.md"]
+    assert payload["ingestion_failure_paths"] == ["employee/doc_00013.md"]
+    assert payload["indexing_failure_paths"] == ["employee/doc_00042.md"]
 
 
 def test_log_loadtest_run_complete_emits_a_distinct_event_with_summary_fields(caplog):

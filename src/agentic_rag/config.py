@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     sync_interval_seconds: float = Field(default=60.0, gt=0)
     sync_snapshot_path: Path = Path("./data/sync_snapshot.json")
     chunk_size_chars: int = 2000
-    access_tiers: list[str] = ["tier-1", "tier-2", "tier-3"]
+    access_tiers: list[str] = ["employee", "manager", "director"]
     ollama_base_url: str = "http://localhost:11434"
     # Deliberately short and separate from embedding_timeout_seconds/
     # generation_timeout_seconds - a readiness probe exists to answer

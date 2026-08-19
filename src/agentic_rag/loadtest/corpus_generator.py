@@ -18,10 +18,10 @@ CHARS_PER_PAGE = 3000
 # known_tiers) import this single constant, so the load test stays fully
 # self-contained regardless of what ACCESS_TIERS happens to be configured
 # to for the real app - a customized ACCESS_TIERS env var would otherwise
-# make every generated tier-1/tier-2/tier-3 document fail tagging
+# make every generated employee/manager/director document fail tagging
 # (corpus folders wouldn't match the configured tiers), silently zeroing
 # out the whole ingestion phase.
-DEFAULT_ACCESS_TIERS: tuple[str, ...] = ("tier-1", "tier-2", "tier-3")
+DEFAULT_ACCESS_TIERS: tuple[str, ...] = ("employee", "manager", "director")
 
 _CITY_NAMES = [
     "Ashford", "Brackenfield", "Corvale", "Dunmoor", "Elmsworth", "Fenwick",
@@ -114,8 +114,8 @@ def _generate_document_text(index: int, seed: int, *, pages: int) -> str:
 
 def _tier_for_index(index: int, document_count: int, access_tiers: Sequence[str]) -> str:
     """Which `access_tiers` subfolder document `index` belongs in, split
-    as evenly as possible across the tiers in order (tier-1 first, then
-    tier-2, ...) - matches the real corpus's own tier-per-subfolder
+    as evenly as possible across the tiers in order (`employee` first,
+    then `manager`, ...) - matches the real corpus's own tier-per-subfolder
     convention (`eval/README.md`'s corpus layout).
     """
     tier_size = -(-document_count // len(access_tiers))  # ceil division

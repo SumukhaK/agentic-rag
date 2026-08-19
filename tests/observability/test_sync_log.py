@@ -42,7 +42,7 @@ def test_log_sync_cycle_message_is_valid_json_with_expected_fields(caplog):
             ingestion_failure_count=1,
             indexing_failure_count=0,
             deletion_failure_count=0,
-            ingestion_failure_paths=["tier-1/bad.md"],
+            ingestion_failure_paths=["employee/bad.md"],
             duration_seconds=3.5,
         )
 
@@ -54,7 +54,7 @@ def test_log_sync_cycle_message_is_valid_json_with_expected_fields(caplog):
     assert payload["ingestion_failure_count"] == 1
     assert payload["indexing_failure_count"] == 0
     assert payload["deletion_failure_count"] == 0
-    assert payload["ingestion_failure_paths"] == ["tier-1/bad.md"]
+    assert payload["ingestion_failure_paths"] == ["employee/bad.md"]
     assert payload["indexing_failure_paths"] == []
     assert payload["deletion_failure_paths"] == []
     assert payload["duration_seconds"] == 3.5
@@ -71,14 +71,14 @@ def test_log_sync_cycle_includes_failure_paths_not_just_counts():
 
     _log_sync_cycle(
         indexing_failure_count=1,
-        indexing_failure_paths=["tier-2/broken.md"],
+        indexing_failure_paths=["manager/broken.md"],
         deletion_failure_count=1,
-        deletion_failure_paths=["tier-1/gone.md"],
+        deletion_failure_paths=["employee/gone.md"],
     )
 
     payload = json.loads(stream.getvalue().strip())
-    assert payload["indexing_failure_paths"] == ["tier-2/broken.md"]
-    assert payload["deletion_failure_paths"] == ["tier-1/gone.md"]
+    assert payload["indexing_failure_paths"] == ["manager/broken.md"]
+    assert payload["deletion_failure_paths"] == ["employee/gone.md"]
 
 
 def test_log_sync_cycle_error_emits_a_distinct_event_with_the_error_message(caplog):
